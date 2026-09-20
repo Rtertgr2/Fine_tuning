@@ -8,12 +8,33 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from backend.adapters.registry import list_adapters
 from backend.app import schemas
 from backend.app.db import get_db
 from backend.app.services import training as svc
 from backend.app.services.training_config import TrainingConfig
 
 router = APIRouter(tags=["training"])
+
+
+@router.get(
+    "/training/base-models",
+    response_model=dict[str, Any],
+)
+def list_base_models():
+    """List available base models: adapters + previously registered models."""
+    adapters = list_adapters()
+    # Also query model_versions table for previously registered models
+    # For now, return adapters as base models
+    models = []
+    for a in adapters:
+        models.append({
+            "id": a["name"],
+            "name": a["display_name"],
+            "hf_repo": a["hf_repo"],
+            "source": "adapter",
+        })
+    return {"items": models}
 
 
 @router.post(

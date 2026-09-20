@@ -87,13 +87,16 @@ const fmtN = (n) => Number(n ?? 0).toLocaleString("th-TH");
 const fmtPct = (num, den) => den > 0 ? Math.round((num / den) * 100) : 0;
 
 /* ---- tabs + routing ---- */
-/* renderExamples is defined in app.editor.js (loaded after this file).
-   We reference it via window to avoid a ReferenceError at parse time. */
+/* renderExamples อยู่ใน app.editor.js และ renderTraining อยู่ใน app.training.js
+   ทั้งสองถูกโหลดหลังจากไฟล์นี้ ใช้ getter เพื่อไม่ให้ ReferenceError ตอน parse
+   ถ้ายังไม่โหลด return stub แสดง "กำลังโหลด..." แทนการ throw */
 const VIEWS = {};
 VIEWS.dashboard = renderDashboard;
-VIEWS.training = window.renderTraining || (() => { throw new Error("app.training.js not loaded"); });
 Object.defineProperty(VIEWS, "examples", {
-  get() { return window.renderExamples || (() => { throw new Error("app.editor.js not loaded"); }); },
+  get() { return window.renderExamples || (() => { $("#view").replaceChildren(h("div", { class: "empty", text: "กำลังโหลด..." })); }); },
+});
+Object.defineProperty(VIEWS, "training", {
+  get() { return window.renderTraining || (() => { $("#view").replaceChildren(h("div", { class: "empty", text: "กำลังโหลด..." })); }); },
 });
 let currentView = params.get("view") === "examples" ? "examples" : params.get("view") === "training" ? "training" : "dashboard";
 function setView(name) {
@@ -246,6 +249,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("#brand-link").addEventListener("click", (e) => { e.preventDefault(); setView("dashboard"); });
   $("#tab-dashboard").addEventListener("click", () => setView("dashboard"));
   $("#tab-examples").addEventListener("click", () => setView("examples"));
+  $("#tab-training").addEventListener("click", () => setView("training"));
   $("#btn-reconnect").addEventListener("click", () => { refreshHealth(); setView(currentView); });
   refreshHealth();
   setView(currentView);

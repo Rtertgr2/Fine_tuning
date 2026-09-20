@@ -29,12 +29,16 @@ async function renderTraining() {
   view.append(box);
 
   try {
-    const [datasets, runs] = await Promise.all([
+    const [datasets, runs, baseModels] = await Promise.all([
       api("/datasets"),
       api("/training/runs"),
+      api("/training/base-models"),
     ]);
+    const ds = Array.isArray(datasets) ? datasets : (datasets.items || []);
+    const rs = Array.isArray(runs) ? runs : (runs.items || []);
+    const bm = Array.isArray(baseModels?.items) ? baseModels.items : [];
     box.remove();
-    view.append(buildTrainingLayout(datasets.items || [], runs.items || []));
+    view.append(buildTrainingLayout(ds, rs, bm));
   } catch (e) {
     box.className = "empty";
     box.replaceChildren(
@@ -43,15 +47,24 @@ async function renderTraining() {
   }
 }
 
-function buildTrainingLayout(datasets, runs) {
+function buildTrainingLayout(datasets, runs, baseModels) {
   const wrap = h("div", { class: "train-layout" });
 
   /* ---- dataset + run selector ---- */
-  const dsOptions = datasets.map(d =>
-    h("option", { value: d.version, selected: d.version === "v0001", text: `${d.version} — ${d.total_examples} ตัวอย่าง · seed=${d.seed}` }));
+  const dsOptions = datasets.map(d => {
+    const counts = d.manifest?.counts?.train || {};
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    return h("option", { value: d.id, selected: d.id === "v0001", text: `${d.id} — ${total} ตัวอย่าง · seed=${d.seed}` });
+  });
 
   const runOptions = runs.map(r =>
     h("option", { value: r.run_id, text: `${r.run_id} · ${r.status} · ${r.dataset_version}` }));
+
+  /* ---- base model dropdown (adapters + custom) ---- */
+  const baseModelOptions = [
+    ...baseModels.map(m => h("option", { value: m.hf_repo, selected: m.hf_repo === "Qwen/Qwen2.5-Coder-7B-Instruct", text: `${m.name} (${m.hf_repo})` })),
+    h("option", { value: "custom", text: "…พิมพ์เอง (custom HF repo)" }),
+  ];
 
   const form = h("div", { class: "card" },
     h("h2", { text: "สร้างรันใหม่" }),
@@ -60,7 +73,8 @@ function buildTrainingLayout(datasets, runs) {
       fieldText("run_name", "ชื่อรัน", "r001", "เช่น r001, r002..."),
     ),
     h("div", { class: "grid-2" },
-      fieldText("base_model", "Base Model", "Qwen/Qwen2.5-Coder-7B-Instruct", "HF repo path"),
+      fieldSelect("base_model_select", "Base Model", baseModelOptions, "เลือกจากระบบ หรือพิมพ์เอง"),
+      fieldText("base_model_custom", "HF repo (ถ้าเลือก custom)", "Qwen/Qwen2.5-Coder-7B-Instruct", "เช่น NousResearch/Hermes-2-Pro-Llama-3-8B"),
       fieldSelect("loss_masking", "Loss Masking", [
         h("option", { value: "assistant_only", selected: true, text: "assistant_only (แนะนำ)" }),
         h("option", { value: "all", text: "all" }),
@@ -172,7 +186,7 @@ function readForm() {
   const chk = id => $("#f-" + id).checked;
   return {
     run_name: str("run_name") || "r001",
-    base_model: str("base_model") || "Qwen/Qwen2.5-Coder-7B-Instruct",
+    base_model: (str("base_model_select") === "custom" ? str("base_model_custom") : str("base_model_select")) || "Qwen/Qwen2.5-Coder-7B-Instruct",
     dataset_version: str("dataset") || "v0001",
     seed: 3407,
     quantization: { load_in_4bit: chk("load_4bit"), quant_type: str("quant_type") || "nf4", double_quant: true },
@@ -270,7 +284,7 @@ function buildRunDetail(run, metrics) {
       h("div", { class: "hint", text: `สร้าง ${fmtTime(run.created_at)} · อัปเดต ${fmtTime(run.completed_at || run.created_at)}` })),
     h("div", { class: "card" },
       h("h2", { text: "ตั้งค่า" }),
-      h("pre", { class: "mono", style: "font-size:12px;max-height:200px;overflow:auto", text: JSON.stringify(JSON.parse(run.config_json || "{}"), null, 2) }))));
+      h("pre", { class: "mono", style: "font-size:12px;max-height:200px;overflow:auto", text: JSON.stringify(run.config || {}, null, 2) }))));
 
   // Metrics chart (text-based sparkline)
   const trainLoss = metrics.filter(m => "train_loss" in m);
@@ -307,7 +321,7 @@ function sparkline(values, w, h) {
   const range = max - min || 1;
   const step = w / (values.length - 1);
   const points = values.map((v, i) => `${i * step},${h - ((v - min) / range) * h}`).join(" ");
-  const svg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block"><polyline points="${points}" fill="none" stroke="#C8553D" stroke-width="1.5"/></svg>`;
+  const svg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block;max-width:100%"><polyline points="${points}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
   return h("div", { innerHTML: svg });
 }
 
