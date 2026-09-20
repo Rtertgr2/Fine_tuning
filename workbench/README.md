@@ -50,6 +50,19 @@ uv pip install --python .venv/bin/python fastapi "uvicorn[standard]" pydantic ji
 Tokenizer จะถูกดาวน์โหลดอัตโนมัติเมื่อใช้ครั้งแรก (เก็บที่ `models/tokenizers/`)
 ถ้าไม่มีการเชื่อมต่อ จะทำงานแบบ offline ได้ แต่ C4 (จำกัด token) จะถูกข้ามและรายงานว่า skip
 
+## Gold Set (T1.10)
+
+ตัวอย่างต้นแบบมือ 108 ตัวอย่างใน `data/gold/` — ผ่าน validator ทุกกฎระดับ err
+
+| หมวด | จำนวน | err | หมายเหตุ |
+|---|---|---|---|
+| tool | 30 | 0 | เขียนไฟล์ใหม่, แก้ไฟล์เดิม, git checkout |
+| loop | 28 | 0 | failure→recovery, giveup (21%), หลาย error type |
+| plan | 30 | 0 | APPROVED + NEEDS_REVISION |
+| sec | 20 | 0 | PASS/REJECT คู่, 6 vuln types |
+
+Dataset v0001 (seed=42): 97 train / 11 val, ไม่มี group leakage, seed reproducible
+
 ## UI v1 (T1.5 ตัวแก้ไข + T1.9 แดชบอร์ด)
 
 หน้าเดียวจบ ที่ `frontend/` (HTML + CSS + JS ธรรมดา ไม่มี build step) เปิดที่

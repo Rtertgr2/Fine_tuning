@@ -89,3 +89,22 @@ mount ที่ `/ui` (StaticFiles) เรียก API แบบ same-origin �
 - ดีไซน์ Warm Notebook (paper/terracotta, Fraunces + IBM Plex Sans Thai) + dark mode
   ผ่าน prefers-color-scheme; สถานะแสดงข้อความเสมอ (ไม่ใช้สีอย่างเดียว), แผงผลตรวจใช้
   aria-live ตามแผน 07 §9
+
+## D7. Gold set: 108 ตัวอย่าง 4 หมวด — ตัดสินใจ 2026-09-20
+
+**ข้อสรุป:** เขียนตัวอย่างต้นแบบมือ 108 ตัวอย่าง (tool:30, loop:28, plan:30, sec:20)
+ผ่าน validator ทุกกฎระดับ err, import เข้า DB, สร้าง dataset v0001 สำเร็จ
+
+**สถานะ validator:**
+- tool: 0 err / 30 warn (T5 call count)
+- loop: 0 err / 12 warn (L1 has-failure, L4 giveup ratio)
+- plan: 0 err / 0 warn
+- sec: 0 err / 2 warn (S6 PASS share 30%, S7 type coverage)
+
+**Dataset v0001:** seed=42, 97 train / 11 val, ไม่มี group leakage, seed reproducible
+
+**สัดส่วน sec:** PASS 6/20 = 30% (ต่ำกว่า S6 window 35-65% แต่เป็น warn ไม่ block)
+→ จะปรับเพิ่ม PASS examples เมื่อทำ active learning (ระยะ 6)
+
+**หมายเหตุ:** ตัวอย่าง sec PASS/REJECT สร้างเป็นคู่ (diff เดียวกัน, ผลลัพธ์ต่าง)
+เพื่อไม่ให้โมเดลเรียนแค่ลักษณะผิวเผิน (ตามแนวทาง §8 ของแผน 01)
