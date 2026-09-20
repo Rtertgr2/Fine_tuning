@@ -87,11 +87,18 @@ const fmtN = (n) => Number(n ?? 0).toLocaleString("th-TH");
 const fmtPct = (num, den) => den > 0 ? Math.round((num / den) * 100) : 0;
 
 /* ---- tabs + routing ---- */
-const VIEWS = { dashboard: renderDashboard, examples: renderExamples };
-let currentView = params.get("view") === "examples" ? "examples" : "dashboard";
+/* renderExamples is defined in app.editor.js (loaded after this file).
+   We reference it via window to avoid a ReferenceError at parse time. */
+const VIEWS = {};
+VIEWS.dashboard = renderDashboard;
+VIEWS.training = window.renderTraining || (() => { throw new Error("app.training.js not loaded"); });
+Object.defineProperty(VIEWS, "examples", {
+  get() { return window.renderExamples || (() => { throw new Error("app.editor.js not loaded"); }); },
+});
+let currentView = params.get("view") === "examples" ? "examples" : params.get("view") === "training" ? "training" : "dashboard";
 function setView(name) {
   currentView = VIEWS[name] ? name : "dashboard";
-  for (const t of ["dashboard", "examples"]) {
+  for (const t of ["dashboard", "examples", "training"]) {
     $("#tab-" + t).setAttribute("aria-selected", String(t === currentView));
   }
   history.replaceState(null, "", `?view=${currentView}`);

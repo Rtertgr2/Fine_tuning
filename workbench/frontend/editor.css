@@ -85,5 +85,21 @@ details.tools-box textarea { margin-top: 6px; min-height: 150px; }
   margin-top: 10px; border: 1px solid color-mix(in srgb, var(--err) 40%, transparent);
   background: var(--err-soft); color: var(--err);
   border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px;
-  white-space: pre-wrap; word-break: break-word; display: none;
-}
+  white-space: pre-wrap; word-break: break-word; display: none;}
+
+/* ---- training tab ---- */
+.train-layout { display: flex; flex-direction: column; gap: 16px; }
+.train-layout .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 700px) { .train-layout .grid-2 { grid-template-columns: 1fr; } }
+.train-layout .fld { display: flex; flex-direction: column; gap: 4px; }
+.train-layout .fld label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.train-layout .fld input, .train-layout .fld select {
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--card); font-size: 13px; color: var(--ink); }
+.train-layout .fld input:focus, .train-layout .fld select:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent); }
+.train-layout .fld small { font-size: 11px; color: var(--faint); }
+pre.mono {
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink);
+  background: var(--card-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; }
+.spark { margin: 8px 0; overflow: hidden; }
