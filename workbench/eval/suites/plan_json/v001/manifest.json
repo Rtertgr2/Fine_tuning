@@ -1,0 +1,13 @@
+{
+  "suite": "plan_json",
+  "version": "v001",
+  "created_at": "2026-09-20T10:43:00.956348+00:00",
+  "cases_count": 50,
+  "cases_sha256": "56d8891a6aa595ca0fb6e2feb63f2f3ca7b1b670fc16254ec39b91251b80e3ea",
+  "frozen": true,
+  "overlap_check": {
+    "method": "group_prefix",
+    "train_groups": []
+  },
+  "description": "Plan JSON structure and status"
+}

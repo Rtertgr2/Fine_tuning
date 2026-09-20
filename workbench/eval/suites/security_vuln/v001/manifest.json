@@ -1,0 +1,14 @@
+{
+  "suite": "security_vuln",
+  "version": "v001",
+  "created_at": "2026-09-20T10:43:00.955394+00:00",
+  "cases_count": 100,
+  "cases_sha256": "bec6b4048bde1e26d310f89eb69b5b0b8b149973ec0294dd69c13cd51228b0f1",
+  "frozen": true,
+  "overlap_check": {
+    "method": "group_prefix",
+    "train_groups": []
+  },
+  "description": "Vulnerability detection",
+  "min_per_type": 5
+}

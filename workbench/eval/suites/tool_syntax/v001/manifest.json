@@ -1,0 +1,13 @@
+{
+  "suite": "tool_syntax",
+  "version": "v001",
+  "created_at": "2026-09-20T10:43:00.954415+00:00",
+  "cases_count": 100,
+  "cases_sha256": "e4baea9599492555d6e7095bf1e832cad278b8fc82974093a4833b193220ae4e",
+  "frozen": true,
+  "overlap_check": {
+    "method": "group_prefix",
+    "train_groups": []
+  },
+  "description": "Single and multi-tool call parsing"
+}

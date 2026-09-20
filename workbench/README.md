@@ -63,6 +63,26 @@ Tokenizer จะถูกดาวน์โหลดอัตโนมัติ�
 
 Dataset v0001 (seed=42): 97 train / 11 val, ไม่มี group leakage, seed reproducible
 
+## Eval Harness (ระยะ 4)
+
+ชุดทดสอบ frozen 5 ชุดใน `eval/suites/` + runners + report generator
+
+| Suite | ขนาด | เกณฑ์ผ่าน |
+|---|---|---|
+| tool_syntax | 100 | 100% (JSON valid, tool name, args) |
+| anti_loop | 40 | >=90% (เปลี่ยนพฤติกรรม/หยุดรายงาน) |
+| security_vuln | 100 | >=85% (REJECT + type + line ถูก) |
+| security_clean | 100 | FP <=10% |
+| plan_json | 50 | JSON valid + status ถูก |
+
+```bash
+# สร้างชุดทดสอบ
+PYTHONPATH=. .venv/bin/python scripts/gen_suites.py
+
+# รัน baseline (ต้องมี llama-server รันอยู่)
+PYTHONPATH=. .venv/bin/python eval/runners/run_baseline.py --model "Hermes-2-Pro-Llama-3-8B" --run-id baseline_hermes2pro
+```
+
 ## UI v1 (T1.5 ตัวแก้ไข + T1.9 แดชบอร์ด)
 
 หน้าเดียวจบ ที่ `frontend/` (HTML + CSS + JS ธรรมดา ไม่มี build step) เปิดที่

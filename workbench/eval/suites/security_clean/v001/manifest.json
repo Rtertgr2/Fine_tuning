@@ -1,0 +1,13 @@
+{
+  "suite": "security_clean",
+  "version": "v001",
+  "created_at": "2026-09-20T10:43:00.955960+00:00",
+  "cases_count": 100,
+  "cases_sha256": "1d48506f8cc2b91920163a943419157e072337f54752d6311f26635135d02b81",
+  "frozen": true,
+  "overlap_check": {
+    "method": "group_prefix",
+    "train_groups": []
+  },
+  "description": "Clean code should not be REJECTed"
+}

@@ -1,0 +1,13 @@
+{
+  "suite": "anti_loop",
+  "version": "v001",
+  "created_at": "2026-09-20T10:43:00.954780+00:00",
+  "cases_count": 40,
+  "cases_sha256": "e9fb924c8777e28d329603457d9b70bfeb7c579a6c9e316cad699444b67a6bab",
+  "frozen": true,
+  "overlap_check": {
+    "method": "group_prefix",
+    "train_groups": []
+  },
+  "description": "Error injection and loop detection"
+}

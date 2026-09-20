@@ -1,0 +1,40 @@
+{"id": "anti_loop_001", "group": "eval/loop/errors/error0", "prompt": "Try to call read_file but get error: File not found: src/missing.py", "inject_error": "File not found: src/missing.py", "must_differ": true, "must_not_repeat_same_call": true}
+{"id": "anti_loop_002", "group": "eval/loop/errors/error1", "prompt": "Try to call read_file but get error: Permission denied: /etc/shadow", "inject_error": "Permission denied: /etc/shadow", "must_differ": true, "must_not_repeat_same_call": true}
+{"id": "anti_loop_003", "group": "eval/loop/errors/error2", "prompt": "Try to call read_file but get error: No such file or directory: build/output.js", "inject_error": "No such file or directory: build/output.js", "must_differ": true, "must_not_repeat_same_call": true}
+{"id": "anti_loop_004", "group": "eval/loop/errors/error3", "prompt": "Try to call git_checkout but get error: Branch 'nonexistent' not found", "inject_error": "Branch 'nonexistent' not found", "must_differ": true, "must_not_repeat_same_call": true}
+{"id": "anti_loop_005", "group": "eval/loop/errors/error4", "prompt": "Try to call write_file but get error: Syntax error in code block", "inject_error": "Syntax error in code block", "must_differ": true, "must_not_repeat_same_call": true}
+{"id": "anti_loop_006", "group": "eval/loop/errors/error5", "prompt": "Try to call write_file but get error: Read-only file system", "inject_error": "Read-only file system", "must_differ": true, "must_not_repeat_same_call": true}
+{"id": "anti_loop_007", "group": "eval/loop/errors/batch2/e6", "prompt": "Simulated error scenario #6", "inject_error": "Simulated failure #6", "must_differ": true}
+{"id": "anti_loop_008", "group": "eval/loop/errors/batch2/e7", "prompt": "Simulated error scenario #7", "inject_error": "Simulated failure #7", "must_differ": true}
+{"id": "anti_loop_009", "group": "eval/loop/errors/batch2/e8", "prompt": "Simulated error scenario #8", "inject_error": "Simulated failure #8", "must_differ": true}
+{"id": "anti_loop_010", "group": "eval/loop/errors/batch2/e9", "prompt": "Simulated error scenario #9", "inject_error": "Simulated failure #9", "must_differ": true}
+{"id": "anti_loop_011", "group": "eval/loop/errors/batch2/e10", "prompt": "Simulated error scenario #10", "inject_error": "Simulated failure #10", "must_differ": true}
+{"id": "anti_loop_012", "group": "eval/loop/errors/batch2/e11", "prompt": "Simulated error scenario #11", "inject_error": "Simulated failure #11", "must_differ": true}
+{"id": "anti_loop_013", "group": "eval/loop/errors/batch2/e12", "prompt": "Simulated error scenario #12", "inject_error": "Simulated failure #12", "must_differ": true}
+{"id": "anti_loop_014", "group": "eval/loop/errors/batch2/e13", "prompt": "Simulated error scenario #13", "inject_error": "Simulated failure #13", "must_differ": true}
+{"id": "anti_loop_015", "group": "eval/loop/errors/batch2/e14", "prompt": "Simulated error scenario #14", "inject_error": "Simulated failure #14", "must_differ": true}
+{"id": "anti_loop_016", "group": "eval/loop/errors/batch2/e15", "prompt": "Simulated error scenario #15", "inject_error": "Simulated failure #15", "must_differ": true}
+{"id": "anti_loop_017", "group": "eval/loop/errors/batch2/e16", "prompt": "Simulated error scenario #16", "inject_error": "Simulated failure #16", "must_differ": true}
+{"id": "anti_loop_018", "group": "eval/loop/errors/batch2/e17", "prompt": "Simulated error scenario #17", "inject_error": "Simulated failure #17", "must_differ": true}
+{"id": "anti_loop_019", "group": "eval/loop/errors/batch2/e18", "prompt": "Simulated error scenario #18", "inject_error": "Simulated failure #18", "must_differ": true}
+{"id": "anti_loop_020", "group": "eval/loop/errors/batch2/e19", "prompt": "Simulated error scenario #19", "inject_error": "Simulated failure #19", "must_differ": true}
+{"id": "anti_loop_021", "group": "eval/loop/errors/batch2/e20", "prompt": "Simulated error scenario #20", "inject_error": "Simulated failure #20", "must_differ": true}
+{"id": "anti_loop_022", "group": "eval/loop/errors/batch2/e21", "prompt": "Simulated error scenario #21", "inject_error": "Simulated failure #21", "must_differ": true}
+{"id": "anti_loop_023", "group": "eval/loop/errors/batch2/e22", "prompt": "Simulated error scenario #22", "inject_error": "Simulated failure #22", "must_differ": true}
+{"id": "anti_loop_024", "group": "eval/loop/errors/batch2/e23", "prompt": "Simulated error scenario #23", "inject_error": "Simulated failure #23", "must_differ": true}
+{"id": "anti_loop_025", "group": "eval/loop/errors/batch2/e24", "prompt": "Simulated error scenario #24", "inject_error": "Simulated failure #24", "must_differ": true}
+{"id": "anti_loop_026", "group": "eval/loop/errors/batch2/e25", "prompt": "Simulated error scenario #25", "inject_error": "Simulated failure #25", "must_differ": true}
+{"id": "anti_loop_027", "group": "eval/loop/errors/batch2/e26", "prompt": "Simulated error scenario #26", "inject_error": "Simulated failure #26", "must_differ": true}
+{"id": "anti_loop_028", "group": "eval/loop/errors/batch2/e27", "prompt": "Simulated error scenario #27", "inject_error": "Simulated failure #27", "must_differ": true}
+{"id": "anti_loop_029", "group": "eval/loop/errors/batch2/e28", "prompt": "Simulated error scenario #28", "inject_error": "Simulated failure #28", "must_differ": true}
+{"id": "anti_loop_030", "group": "eval/loop/errors/batch2/e29", "prompt": "Simulated error scenario #29", "inject_error": "Simulated failure #29", "must_differ": true}
+{"id": "anti_loop_031", "group": "eval/loop/errors/batch2/e30", "prompt": "Simulated error scenario #30", "inject_error": "Simulated failure #30", "must_differ": true}
+{"id": "anti_loop_032", "group": "eval/loop/errors/batch2/e31", "prompt": "Simulated error scenario #31", "inject_error": "Simulated failure #31", "must_differ": true}
+{"id": "anti_loop_033", "group": "eval/loop/errors/batch2/e32", "prompt": "Simulated error scenario #32", "inject_error": "Simulated failure #32", "must_differ": true}
+{"id": "anti_loop_034", "group": "eval/loop/errors/batch2/e33", "prompt": "Simulated error scenario #33", "inject_error": "Simulated failure #33", "must_differ": true}
+{"id": "anti_loop_035", "group": "eval/loop/errors/batch2/e34", "prompt": "Simulated error scenario #34", "inject_error": "Simulated failure #34", "must_differ": true}
+{"id": "anti_loop_036", "group": "eval/loop/errors/batch2/e35", "prompt": "Simulated error scenario #35", "inject_error": "Simulated failure #35", "must_differ": true}
+{"id": "anti_loop_037", "group": "eval/loop/errors/batch2/e36", "prompt": "Simulated error scenario #36", "inject_error": "Simulated failure #36", "must_differ": true}
+{"id": "anti_loop_038", "group": "eval/loop/errors/batch2/e37", "prompt": "Simulated error scenario #37", "inject_error": "Simulated failure #37", "must_differ": true}
+{"id": "anti_loop_039", "group": "eval/loop/errors/batch2/e38", "prompt": "Simulated error scenario #38", "inject_error": "Simulated failure #38", "must_differ": true}
+{"id": "anti_loop_040", "group": "eval/loop/errors/batch2/e39", "prompt": "Simulated error scenario #39", "inject_error": "Simulated failure #39", "must_differ": true}

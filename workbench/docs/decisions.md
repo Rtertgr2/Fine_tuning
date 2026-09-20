@@ -108,3 +108,27 @@ mount ที่ `/ui` (StaticFiles) เรียก API แบบ same-origin �
 
 **หมายเหตุ:** ตัวอย่าง sec PASS/REJECT สร้างเป็นคู่ (diff เดียวกัน, ผลลัพธ์ต่าง)
 เพื่อไม่ให้โมเดลเรียนแค่ลักษณะผิวเผิน (ตามแนวทาง §8 ของแผน 01)
+
+## D8. Eval Harness: ชุดทดสอบ frozen + runners — ตัดสินใจ 2026-09-20
+
+**ข้อสรุป:** สร้าง eval harness ครบตามระยะ 4 — config gates, test suites 5 ชุด, runners, report, tests
+
+**Frozen suites (eval/suites/):**
+- tool_syntax: 100 cases (เป้าหมาย >=100 ผ่าน)
+- anti_loop: 40 cases (เป้าหมาย >=90% เปลี่ยนพฤติกรรม/หยุดรายงาน)
+- security_vuln: 100 cases (10 types x 10 cases, เป้า >=85% REJECT ถูกต้อง)
+- security_clean: 100 cases (เป้า FP <=10%)
+- plan_json: 50 cases (เป้า JSON valid + status ถูก)
+
+**Gates (locked):**
+- tool_syntax >=100% | anti_loop >=90% | security_catch >=85%
+- security_fp <=10% | speed_8k >=30 tok/s | regression within 3 pts
+
+**สถานะ:** harness ทำงานได้, เทสต์หน่วยผ่าน 98 tests
+การรัน baseline จริง (T4.10-T4.11) ต้องมี llama-server รันอยู่
+(ตอนนี้ยัมไม่มี GGUF บนเครื่อง — เป็นงานของระยะ 5)
+
+**รัน baseline เมื่อพร้อม:**
+```bash
+PYTHONPATH=. .venv/bin/python eval/runners/run_baseline.py --model "Hermes-2-Pro-Llama-3-8B" --run-id baseline_hermes2pro
+```
