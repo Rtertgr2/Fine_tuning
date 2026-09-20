@@ -1,0 +1,22 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# workbench data (generated)
+data/examples.db
+data/examples.db-*
+data/datasets/
+models/tokenizers/
+models/*/
+!models/.gitkeep
+
+# test artifacts
+.pytest_cache/
+.coverage
+
+# editor
+.idea/
+.vscode/
+*.swp
