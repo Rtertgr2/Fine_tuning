@@ -50,6 +50,21 @@ uv pip install --python .venv/bin/python fastapi "uvicorn[standard]" pydantic ji
 Tokenizer จะถูกดาวน์โหลดอัตโนมัติเมื่อใช้ครั้งแรก (เก็บที่ `models/tokenizers/`)
 ถ้าไม่มีการเชื่อมต่อ จะทำงานแบบ offline ได้ แต่ C4 (จำกัด token) จะถูกข้ามและรายงานว่า skip
 
+## UI v1 (T1.5 ตัวแก้ไข + T1.9 แดชบอร์ด)
+
+หน้าเดียวจบ ที่ `frontend/` (HTML + CSS + JS ธรรมดา ไม่มี build step) เปิดที่
+`http://127.0.0.1:8300/ui/` — serve โดย FastAPI ตัวเดียวกัน จึงเรียก API แบบ same-origin
+
+- **ตัวแก้ไข (T1.5):** แก้ตัวอย่างแบบ multi-turn (system/user/assistant/tool), เติม tools
+  มาตรฐานให้หมวด tool/loop, ผลตรวจสดจาก `POST /validate` (debounce 300 ms) + ตัวนับ
+  token จริงและพรีวิวหลัง render จาก `POST /render`, ลิงก์กระโดดไปข้อความที่ผิด, บันทึกด้วย
+  POST/PUT และเปลี่ยนสถานะได้ (Ctrl+S)
+- **แดชบอร์ด (T1.9):** ความคืบหน้าต่อหมวด + อัตราผ่านตรวจ, สัดส่วน PASS/REJECT ของหมวด
+  sec (เทียบหน้าต่างเป้า S6), กราฟความยาว token, สถิติจำนวนครั้งที่แต่ละกฎตัดข้อมูล — ข้อมูล
+  ทั้งหมดจาก `GET /stats`
+- ตัวตรวจอยู่ฝั่ง backend ที่เดียว UI แค่แสดงผล (แผน 07 หลักการข้อ 6); เปิดไฟล์ HTML ตรง ๆ
+  (file://) ก็ได้ด้วย `?api=http://127.0.0.1:8300` (CORS เปิดเฉพาะ localhost)
+
 ## API หลัก (ระยะ 1)
 
 | Method | Path | หน้าที่ |
@@ -59,6 +74,8 @@ Tokenizer จะถูกดาวน์โหลดอัตโนมัติ�
 | PUT | /examples/{id} | แก้ไข |
 | POST | /examples/{id}/status | เปลี่ยนสถานะ (draft/approved/rejected) |
 | POST | /validate | ตรวจร่างโดยไม่บันทึก |
+| POST | /render | พรีวิวหลัง render + นับ token จริง (ของตัวแก้ไข UI) |
+| GET | /tools | นิยาม tools มาตรฐาน (ของตัวแก้ไข UI) |
 | POST | /import | นำเข้า .jsonl |
 | GET | /export | ส่งออก .jsonl |
 | GET | /stats | สรุปสัดส่วนและคุณภาพ |

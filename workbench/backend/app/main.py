@@ -8,11 +8,15 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.app import config
 from backend.app.db import init_db
-from backend.app.routers import datasets, examples, stats, validate
+from backend.app.routers import datasets, examples, render, stats, validate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,3 +46,16 @@ app.include_router(examples.router)
 app.include_router(validate.router)
 app.include_router(datasets.router)
 app.include_router(stats.router)
+app.include_router(render.router)
+
+# UI v1 (T1.5/T1.9): single-page HTML served by the same process, so the
+# editor talks to the API same-origin with no build step. CORS only opens
+# localhost origins for running the file standalone.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+_FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+app.mount("/ui", StaticFiles(directory=_FRONTEND_DIR, html=True), name="ui")

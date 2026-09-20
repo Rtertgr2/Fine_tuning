@@ -73,3 +73,19 @@ path ฝังแท็กเป็นทางเดียวทั้งระ
 ตัวอย่าง agent ต้องแบก system + tools preamble + tool results หลายรอบ; 8192 คือค่าที่
 ทดสอบ C4 กับข้อมูลจริงได้ ปรับผ่าน `WORKBENCH_MAX_SEQ_LEN` (แผน 00 เสี่ยงเรื่อง context
 32k บน VRAM 12GB — ค่านี้จะถูกวัดจริงในระยะ 3/4)
+
+## D6. UI v1: หน้า HTML เดียว serve โดย FastAPI — ตัดสินใจ 2026-09-20
+
+**ข้อสรุป:** `frontend/index.html` (+ styles/app js) ธรรมดา ไม่มี build step FastAPI
+mount ที่ `/ui` (StaticFiles) เรียก API แบบ same-origin — ตามค่าตั้งต้นของแผน 07 §15.3
+(UI v1 จนถึง G4 ค่อยย้าย Vite+React)
+
+**เหตุผล:**
+- ต้นแบบ `finetune-workbench.html` ที่แผน 07 อ้างถึงไม่พบในเครื่อง จึงสร้าง UI v1 ใหม่
+  โดยเก็บหลักการเดิม: ตัวตรวจอยู่ backend ที่เดียว (UI เรียก `/validate` debounce 300 ms
+  และ `/render` สำหรับพรีวิว+นับ token จริง) ไม่มีตรรกะตรวจซ้ำฝั่ง JS
+- serve ผ่านตัว server เดียวกันจบเรื่อง CORS ตอนใช้งานปกติ เปิด CORS เฉพาะ localhost
+  ไว้สำหรับเปิดไฟล์ตรง ๆ (file://) ระหว่างพัฒนา
+- ดีไซน์ Warm Notebook (paper/terracotta, Fraunces + IBM Plex Sans Thai) + dark mode
+  ผ่าน prefers-color-scheme; สถานะแสดงข้อความเสมอ (ไม่ใช้สีอย่างเดียว), แผงผลตรวจใช้
+  aria-live ตามแผน 07 §9

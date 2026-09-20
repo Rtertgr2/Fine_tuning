@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workbench — Dataset Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <a class="brand-name" href="?view=dashboard" id="brand-link">Workbench<span class="brand-sub">Dataset Studio</span></a>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="ส่วนหลัก">
+    <button class="tab" id="tab-dashboard" role="tab" aria-selected="false">ภาพรวม</button>
+    <button class="tab" id="tab-examples" role="tab" aria-selected="false">ตัวอย่าง</button>
+  </nav>
+  <div class="topbar-right">
+    <span class="chip chip-adapter" id="adapter-chip" title="adapter ที่ใช้">…</span>
+  </div>
+</header>
+
+<main id="view" class="view"></main>
+
+<footer class="statusbar">
+  <span class="dot" id="health-dot" aria-hidden="true"></span>
+  <span id="health-text">กำลังเชื่อมต่อ…</span>
+  <span class="sep">·</span>
+  <span id="api-label"></span>
+  <span class="spacer"></span>
+  <button class="btn btn-ghost btn-sm" id="btn-reconnect">เชื่อมต่อใหม่</button>
+</footer>
+
+<div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+<noscript>หน้านี้ต้องใช้ JavaScript</noscript>
+<script src="app.core.js"></script>
+<script src="app.editor.js"></script>
+</body>
+</html>
