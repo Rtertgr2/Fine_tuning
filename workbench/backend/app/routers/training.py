@@ -154,7 +154,7 @@ def get_training_metrics(
     "/training/runs/{run_id}/preflight",
     response_model=dict[str, Any],
 )
-def run_preflight(
+def run_preflight_endpoint(
     run_id: str,
     conn: sqlite3.Connection = Depends(get_db),
 ):
@@ -163,7 +163,8 @@ def run_preflight(
     if record is None:
         raise HTTPException(404, f"training run {run_id!r} not found")
 
-    cfg = TrainingConfig.from_dict(json.loads(record["config_json"]))
+    # get_run returns "config" as parsed dict — use directly
+    cfg = TrainingConfig.from_dict(record.get("config", {}))
 
     from backend.app.services.preflight import run_preflight
     report = run_preflight(cfg)
