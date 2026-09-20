@@ -55,6 +55,12 @@ def row_to_out(row: sqlite3.Row) -> dict[str, Any]:
 def _payload(data: schemas.ExampleIn | schemas.ExamplePatch) -> tuple[list[dict], list[dict] | None]:
     messages = [m.model_dump() for m in (data.messages or [])]
     tools = list(data.tools) if data.tools else None
+    # tool/loop examples must carry the tool definitions: at training time the
+    # tool_use template injects these into the system prompt exactly once.
+    if tools is None and getattr(data, "category", None) in ("tool", "loop"):
+        from backend.tools.registry import tool_schemas
+
+        tools = tool_schemas()
     return messages, tools
 
 

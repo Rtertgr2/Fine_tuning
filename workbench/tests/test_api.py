@@ -45,6 +45,34 @@ def _tool_payload(i: int, group: str | None = None) -> dict:
     }
 
 
+def test_tools_autofilled_for_tool_category(client):
+    """tool/loop examples must carry the registry's tool definitions."""
+    r = client.post("/examples", json=_tool_payload(30))
+    body = r.json()
+    tools = body["example"]["tools"]
+    assert tools is not None
+    assert [t["function"]["name"] for t in tools] == ["git_checkout", "read_file", "write_file"]
+
+    # plan examples stay without tools
+    plan = {
+        "category": "plan",
+        "messages": [
+            {"role": "user", "content": "x"},
+            {
+                "role": "assistant",
+                "content": '{"status": "APPROVED", "target_version": "v1.0.0", "critique": "c", "final_plan": "f"}',
+            },
+        ],
+    }
+    assert client.post("/examples", json=plan).json()["example"]["tools"] is None
+
+
+def test_token_count_includes_tools_preamble(client, tmp_workbench):
+    r = client.post("/examples", json=_tool_payload(31))
+    count_with_tools = r.json()["example"]["token_count"]
+    assert count_with_tools is not None and count_with_tools > 100
+
+
 def test_health(client):
     r = client.get("/health")
     assert r.status_code == 200
