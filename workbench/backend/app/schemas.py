@@ -1,10 +1,11 @@
 """API schemas (pydantic)."""
-
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from backend.app.services.training_config import DEFAULT_BASE_MODEL
 
 Category = Literal["tool", "loop", "plan", "sec"]
 Status = Literal["draft", "approved", "rejected"]
@@ -17,6 +18,8 @@ QuantLevel = Literal["Q4_K_M", "Q5_K_M", "Q8_0", "Q2_K", "Q3_K_M", "Q6_K"]
 
 MODEL_STATUSES: tuple[str, ...] = ("candidate", "staging", "production", "retired")
 QUANT_LEVELS: tuple[str, ...] = ("Q4_K_M", "Q5_K_M", "Q8_0", "Q2_K", "Q3_K_M", "Q6_K")
+
+TrainingStatus = Literal["pending", "running", "completed", "stopped", "failed"]
 
 
 class Message(BaseModel):
@@ -153,3 +156,72 @@ class RollbackResult(BaseModel):
     version: str
     previous_production: str | None = None
     message: str
+
+
+# ── Review Queue Schemas (Phase 2) ─────────────────────────────────────
+
+
+class ReviewQueueItem(BaseModel):
+    id: str
+    category: str
+    example_data: dict[str, Any]
+    status: str
+    reason: str | None = None
+    reviewer: str | None = None
+    group_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class ReviewQueueList(BaseModel):
+    total: int
+    items: list[ReviewQueueItem]
+
+
+# ── Training Schemas (Phase 3) ───────────────────────────────────────────
+
+
+class TrainingRunIn(BaseModel):
+    config: dict[str, Any] | None = None
+
+
+class TrainingRunOut(BaseModel):
+    run_id: str
+    config: dict[str, Any]
+    status: TrainingStatus
+    dataset_version: str | None = None
+    adapter_path: str | None = None
+    metrics_path: str | None = None
+    report_path: str | None = None
+    created_at: str
+    completed_at: str | None = None
+
+
+class TrainingRunListOut(BaseModel):
+    total: int
+    items: list[TrainingRunOut]
+
+
+class PreflightResultOut(BaseModel):
+    code: str
+    passed: bool
+    message: str
+    details: dict[str, Any] = {}
+    critical: bool = False
+
+
+class PreflightReportOut(BaseModel):
+    can_proceed: bool
+    all_passed: bool
+    results: list[PreflightResultOut]
+
+
+class MetricEntryOut(BaseModel):
+    step: int
+    train_loss: float | None = None
+    eval_loss: float | None = None
+    learning_rate: float | None = None
+    grad_norm: float | None = None
+    epoch: float | None = None
+    elapsed_seconds: float | None = None
+    timestamp: str = ""

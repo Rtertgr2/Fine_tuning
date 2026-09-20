@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app import config
 from backend.app.db import init_db
-from backend.app.routers import datasets, examples, models, render, stats, validate
+from backend.app.routers import datasets, examples, models, render, stats, training, validate, review, cases
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,8 +31,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Fine-tuning Workbench",
-    version="0.1.0",
-    description="Dataset Studio (Phase 1): author, validate, version and export fine-tuning data.",
+    version="0.2.0",
+    description="Dataset Studio (Phase 1) + Training Launcher (Phase 3).",
     lifespan=lifespan,
 )
 
@@ -48,6 +48,9 @@ app.include_router(datasets.router)
 app.include_router(stats.router)
 app.include_router(render.router)
 app.include_router(models.router)
+app.include_router(review.router)
+app.include_router(training.router)
+app.include_router(cases.router)
 
 # UI v1 (T1.5/T1.9): single-page HTML served by the same process, so the
 # editor talks to the API same-origin with no build step. CORS only opens

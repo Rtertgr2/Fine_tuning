@@ -1,0 +1,153 @@
+"""Training router API (T3.4): endpoints for managing training runs."""
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from backend.app import schemas
+from backend.app.db import get_db
+from backend.app.services import training as svc
+from backend.app.services.training_config import TrainingConfig
+
+router = APIRouter(tags=["training"])
+
+
+@router.post(
+    "/training/runs",
+    status_code=201,
+    response_model=dict[str, Any],
+)
+def start_training_run(
+    payload: schemas.TrainingRunIn,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Start a new training run."""
+    cfg = TrainingConfig.from_dict(payload.config if payload.config else {})
+    errors = cfg.validate()
+    if errors:
+        raise HTTPException(422, detail={"message": "config validation failed", "errors": errors})
+
+    try:
+        record = svc.create_run(
+            conn,
+            config_json=cfg.to_dict(),
+            dataset_version=cfg.dataset_version,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    return record
+
+
+@router.get(
+    "/training/runs/{run_id}",
+    response_model=dict[str, Any],
+)
+def get_training_run(
+    run_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Get training run status."""
+    record = svc.get_run(conn, run_id)
+    if record is None:
+        raise HTTPException(404, f"training run {run_id!r} not found")
+    return record
+
+
+@router.get(
+    "/training/runs",
+    response_model=dict[str, Any],
+)
+def list_training_runs(
+    status: str | None = None,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """List training runs, optionally filtered by status."""
+    items = svc.list_runs(conn, status_filter=status)
+    return {"total": len(items), "items": items}
+
+
+@router.post(
+    "/training/runs/{run_id}/stop",
+    response_model=dict[str, Any],
+)
+def stop_training_run(
+    run_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Stop a training run."""
+    record = svc.stop_run(conn, run_id)
+    if record is None:
+        raise HTTPException(404, f"training run {run_id!r} not found")
+    return record
+
+
+@router.post(
+    "/training/runs/{run_id}/resume",
+    response_model=dict[str, Any],
+)
+def resume_training_run(
+    run_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Resume a stopped training run from its best checkpoint."""
+    record = svc.resume_run(conn, run_id)
+    if record is None:
+        raise HTTPException(404, f"training run {run_id!r} not found")
+    return record
+
+
+@router.get(
+    "/training/runs/{run_id}/metrics",
+    response_model=dict[str, Any],
+)
+def get_training_metrics(
+    run_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Get metrics for a training run (returns all entries).
+
+    For SSE live streaming, the frontend can poll this endpoint periodically.
+    """
+    record = svc.get_run(conn, run_id)
+    if record is None:
+        raise HTTPException(404, f"training run {run_id!r} not found")
+
+    from pathlib import Path
+    from runner.metrics import load_metrics
+
+    metrics_path = record.get("metrics_path")
+    if metrics_path:
+        entries = load_metrics(Path(metrics_path))
+    else:
+        entries = []
+
+    return {"run_id": run_id, "metrics": entries}
+
+
+@router.post(
+    "/training/runs/{run_id}/preflight",
+    response_model=dict[str, Any],
+)
+def run_preflight(
+    run_id: str,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Run pre-flight checks PF1-PF6 for a training run."""
+    record = svc.get_run(conn, run_id)
+    if record is None:
+        raise HTTPException(404, f"training run {run_id!r} not found")
+
+    cfg = TrainingConfig.from_dict(json.loads(record["config_json"]))
+
+    from backend.app.services.preflight import run_preflight
+    report = run_preflight(cfg)
+
+    # Store preflight result in the run record
+    svc.update_run(conn, run_id, preflight=json.dumps(report.to_dict()))
+
+    return report.to_dict()
