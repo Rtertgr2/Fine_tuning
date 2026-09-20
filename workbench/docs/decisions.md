@@ -132,3 +132,13 @@ mount ที่ `/ui` (StaticFiles) เรียก API แบบ same-origin �
 ```bash
 PYTHONPATH=. .venv/bin/python eval/runners/run_baseline.py --model "Hermes-2-Pro-Llama-3-8B" --run-id baseline_hermes2pro
 ```
+
+## D9. Execution Plan (08) — ตัดสินใจ 2026-09-20
+
+**ข้อสรุป:** จัดทำ `docs/execution-plan.md` สรุปตารางสัปดาห์, go/no-go gates, critical path, กฎตัดขอบเขต จาก 6 Phase ที่ทำเสร็จ
+
+**Key gates:** G0 (W0 hardware check), G1 (W5 baseline), G2 (W7 pilot), G3 (W10 full), G4 (W12 AL loop)
+
+**Critical path:** D1-D11 → T1.0 → T1.2 → T2.2 → T4.3-T4.6 → baseline → pilot → full train
+
+**Scope cut order:** UI v2 → Runner B/dashboard → AL semi-manual → smaller v002 → never cut frozen eval/loss mask/template parity/gate/rollback
