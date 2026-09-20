@@ -38,13 +38,31 @@ CREATE TABLE IF NOT EXISTS dataset_versions (
     created_at       TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS model_versions (
+    version          TEXT PRIMARY KEY,
+    dataset_version  TEXT,
+    train_run        TEXT,
+    llama_cpp_commit TEXT,
+    quant            TEXT NOT NULL
+                     CHECK (quant IN ('Q4_K_M','Q5_K_M','Q8_0','Q2_K','Q3_K_M','Q6_K')),
+    gguf_sha256      TEXT,
+    eval_report      TEXT,
+    status           TEXT NOT NULL DEFAULT 'candidate'
+                     CHECK (status IN ('candidate','staging','production','retired')),
+    manifest_json    TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    promoted_at      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_model_status ON model_versions(status);
+
 CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 """
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:

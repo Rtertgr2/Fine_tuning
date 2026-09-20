@@ -12,6 +12,12 @@ Source = Literal["manual", "generated", "active_learning"]
 
 CATEGORIES: tuple[str, ...] = ("tool", "loop", "plan", "sec")
 
+ModelStatus = Literal["candidate", "staging", "production", "retired"]
+QuantLevel = Literal["Q4_K_M", "Q5_K_M", "Q8_0", "Q2_K", "Q3_K_M", "Q6_K"]
+
+MODEL_STATUSES: tuple[str, ...] = ("candidate", "staging", "production", "retired")
+QUANT_LEVELS: tuple[str, ...] = ("Q4_K_M", "Q5_K_M", "Q8_0", "Q2_K", "Q3_K_M", "Q6_K")
+
 
 class Message(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
@@ -95,3 +101,55 @@ class ImportResult(BaseModel):
     failed: int
     errors: list[dict[str, Any]] = []
     example_ids: list[str] = []
+
+
+# ── Model Registry Schemas (Phase 4) ──────────────────────────────────────
+
+
+class ModelRegisterIn(BaseModel):
+    version: str = Field(..., pattern=r"^v\d+\.\d+\.\d+$")
+    dataset_version: str | None = None
+    train_run: str | None = None
+    llama_cpp_commit: str | None = None
+    quant: QuantLevel = "Q5_K_M"
+    gguf_sha256: str | None = None
+    eval_report: str | None = None
+    status: ModelStatus = "candidate"
+
+
+class ModelPromoteIn(BaseModel):
+    target_status: ModelStatus = "production"
+
+
+class ModelOut(BaseModel):
+    version: str
+    dataset_version: str | None = None
+    train_run: str | None = None
+    llama_cpp_commit: str | None = None
+    quant: QuantLevel
+    gguf_sha256: str | None = None
+    eval_report: str | None = None
+    status: ModelStatus
+    manifest: dict[str, Any]
+    created_at: str
+    promoted_at: str | None = None
+
+
+class ModelListOut(BaseModel):
+    total: int
+    items: list[ModelOut]
+
+
+class PromoteResult(BaseModel):
+    version: str
+    previous_status: ModelStatus
+    new_status: ModelStatus
+    previous_production: str | None = None
+    gate_passed: bool
+    message: str
+
+
+class RollbackResult(BaseModel):
+    version: str
+    previous_production: str | None = None
+    message: str

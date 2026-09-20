@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app import config
 from backend.app.db import init_db
-from backend.app.routers import datasets, examples, render, stats, validate
+from backend.app.routers import datasets, examples, models, render, stats, validate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ app.include_router(validate.router)
 app.include_router(datasets.router)
 app.include_router(stats.router)
 app.include_router(render.router)
+app.include_router(models.router)
 
 # UI v1 (T1.5/T1.9): single-page HTML served by the same process, so the
 # editor talks to the API same-origin with no build step. CORS only opens
