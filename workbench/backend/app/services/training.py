@@ -5,6 +5,8 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,9 @@ from typing import Any
 from backend.app import config
 
 RUN_ID_RE = re.compile(r"^r(\d+)$")
+
+# Track active training processes: run_id -> Popen
+_active_processes: dict[str, subprocess.Popen] = {}
 
 
 def _now_iso() -> str:
@@ -50,19 +55,99 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _generate_training_script(run_dir: Path, config_json: dict[str, Any]) -> Path:
+    """Generate training script from config into run_dir."""
+    from backend.app.services.training_config import TrainingConfig
+    from scripts.generate_training_script import generate_script
+
+    cfg = TrainingConfig.from_dict(config_json)
+    output = run_dir / "train.py"
+    generate_script(cfg=cfg, output_path=str(output))
+    return output
+
+
+def _run_training_process(run_id: str, run_dir: Path) -> None:
+    """Background task: generate script + run training subprocess."""
+    import sqlite3 as sq
+    
+    # Connect to DB
+    conn = sq.connect(str(config.DATA_DIR / "examples.db"))
+    conn.row_factory = sq.Row
+    
+    try:
+        # Update status to running
+        conn.execute("UPDATE training_runs SET status = ? WHERE run_id = ?", ("running", run_id))
+        conn.commit()
+        
+        # Generate training script
+        config_json = json.loads(
+            conn.execute("SELECT config_json FROM training_runs WHERE run_id = ?", (run_id,)).fetchone()["config_json"]
+        )
+        conn.close()
+        
+        script_path = _generate_training_script(run_dir, config_json)
+        
+        # Start training subprocess
+        proc = subprocess.Popen(
+            [sys.executable, str(script_path)],
+            cwd=str(run_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        _active_processes[run_id] = proc
+        
+        # Wait for completion
+        stdout, _ = proc.communicate()
+        
+        # Update DB with result
+        conn = sq.connect(str(config.DATA_DIR / "examples.db"))
+        conn.row_factory = sq.Row
+        
+        if proc.returncode == 0:
+            conn.execute(
+                "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
+                ("completed", _now_iso(), run_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
+                ("failed", _now_iso(), run_id),
+            )
+            # Write error log
+            (run_dir / "error.log").write_text(stdout, encoding="utf-8")
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        conn = sq.connect(str(config.DATA_DIR / "examples.db"))
+        conn.execute(
+            "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
+            ("failed", _now_iso(), run_id),
+        )
+        conn.commit()
+        conn.close()
+        (run_dir / "error.log").write_text(str(e), encoding="utf-8")
+    finally:
+        _active_processes.pop(run_id, None)
+
+
 def create_run(
     conn: sqlite3.Connection,
     config_json: dict[str, Any],
     dataset_version: str = "",
 ) -> dict[str, Any]:
-    """Create a new training run record and set up its output directory."""
+    """Create a new training run record and set up its output directory.
+    
+    Immediately generates training script and starts training in background thread.
+    """
     run_id = _next_run_id(conn)
     now = _now_iso()
 
     # Set up output directory
     run_dir = _runs_dir() / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    run_dir.mkdir(exist_ok=True)
 
     conn.execute(
         """INSERT INTO training_runs
@@ -79,10 +164,25 @@ def create_run(
     )
     conn.commit()
 
+    # Generate training script
+    _generate_training_script(run_dir, config_json)
+
+    # Start training in background thread
+    import threading
+    t = threading.Thread(target=_run_training_process, args=(run_id, run_dir), daemon=True)
+    t.start()
+
     row = conn.execute(
         "SELECT * FROM training_runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     return _row_to_dict(row)
+
+
+def start_run(run_id: str) -> None:
+    """Start training in background."""
+    from fastapi import BackgroundTasks
+    # This will be called from the router with BackgroundTasks
+    pass
 
 
 def get_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
@@ -154,7 +254,15 @@ def update_run(
 
 
 def stop_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
-    """Mark a training run as stopped."""
+    """Stop a training run: kill process + update status."""
+    proc = _active_processes.get(run_id)
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    _active_processes.pop(run_id, None)
     return update_run(conn, run_id, status="stopped")
 
 

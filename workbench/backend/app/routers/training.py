@@ -6,13 +6,13 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from backend.adapters.registry import list_adapters
-from backend.app import schemas
+from backend.app import config, schemas
 from backend.app.db import get_db
 from backend.app.services import training as svc
 from backend.app.services.training_config import TrainingConfig
+from backend.adapters.registry import list_adapters
 
 router = APIRouter(tags=["training"])
 
@@ -42,11 +42,12 @@ def list_base_models():
     status_code=201,
     response_model=dict[str, Any],
 )
-def start_training_run(
+async def start_training_run(
     payload: schemas.TrainingRunIn,
+    background_tasks: BackgroundTasks,
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Start a new training run."""
+    """Start a new training run (generates script + starts background process)."""
     cfg = TrainingConfig.from_dict(payload.config if payload.config else {})
     errors = cfg.validate()
     if errors:
@@ -60,6 +61,15 @@ def start_training_run(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+    run_id = record["run_id"]
+    runs_dir = config.DATA_DIR / "training" / "runs" / run_id
+
+    # Generate training script immediately
+    script_path = svc._generate_training_script(runs_dir, cfg.to_dict())
+
+    # Start training in background
+    background_tasks.add_task(svc._run_training_process, run_id, runs_dir)
 
     return record
 
