@@ -1,0 +1,16 @@
+# runtime data (SQLite, generated datasets) — dataset artifacts are produced
+# by build_dataset; gold set files under data/gold/ are the only tracked part
+workbench/data/*.db
+workbench/data/*.db-journal
+workbench/data/*.db-wal
+workbench/data/*.db-shm
+workbench/data/datasets/
+
+# local dev scratch
+workbench/tmp/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/

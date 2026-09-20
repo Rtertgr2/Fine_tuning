@@ -21,12 +21,16 @@ def render_jinja(
 ) -> str:
     from transformers.utils import chat_template_utils as ctu
 
-    env = ctu._compile_jinja_template(template_text)
-    return env.render(
-        messages=list(messages),
-        tools=list(tools) if tools else [],
+    # Public API (transformers >= 5.x): same compiler + tojson filter as
+    # training-time apply_chat_template, no private access. Returns
+    # (rendered_texts, generation_indices); one conversation -> one string.
+    rendered, _generation_indices = ctu.render_jinja_template(
+        conversations=[list(messages)],
+        tools=list(tools) if tools else None,
+        chat_template=template_text,
         bos_token=bos_token,
         eos_token=eos_token,
         add_generation_prompt=add_generation_prompt,
         **extra,
     )
+    return rendered[0]
