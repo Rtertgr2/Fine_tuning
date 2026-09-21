@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+import asyncio
 
 from backend.app import config, schemas
 from backend.app.db import get_db
@@ -54,7 +55,7 @@ async def start_training_run(
         raise HTTPException(422, detail={"message": "config validation failed", "errors": errors})
 
     try:
-        record = svc.create_run(
+        record = svc.create_run_sync(
             conn,
             config_json=cfg.to_dict(),
             dataset_version=cfg.dataset_version,
@@ -65,11 +66,14 @@ async def start_training_run(
     run_id = record["run_id"]
     runs_dir = config.DATA_DIR / "training" / "runs" / run_id
 
-    # Generate training script immediately
-    script_path = svc._generate_training_script(runs_dir, cfg.to_dict())
+    # Generate training script (always do this — belt and suspenders)
+    cfg = TrainingConfig.from_dict(payload.config if payload.config else {})
+    from backend.app.services.training import _generate_training_script
+    _generate_training_script(runs_dir, cfg.to_dict())
 
-    # Start training in background
-    background_tasks.add_task(svc._run_training_process, run_id, runs_dir)
+    # Start training as background asyncio task
+    loop = asyncio.get_running_loop()
+    loop.create_task(svc._run_training_process(run_id, runs_dir))
 
     return record
 

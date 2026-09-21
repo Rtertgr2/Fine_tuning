@@ -1,22 +1,19 @@
-# python
-__pycache__/
-*.py[cod]
-.venv/
-*.egg-info/
+# Training outputs
+data/training/runs/r*/
+data/training/runs/test_gen/
 
-# workbench data (generated)
-data/examples.db
-data/examples.db-*
-data/datasets/
-models/tokenizers/
-models/*/
-!models/.gitkeep
+# Test artifacts
+test_train_gen.py
+eval/reports/test_report_*.json
 
-# test artifacts
-.pytest_cache/
-.coverage
+# Python cache
+**/__pycache__/
+*.pyc
 
-# editor
-.idea/
+# IDE
 .vscode/
-*.swp
+.idea/
+
+# Local config
+.env
+*.log

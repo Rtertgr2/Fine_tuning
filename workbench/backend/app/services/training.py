@@ -1,6 +1,7 @@
 """Training run service layer: CRUD + run lifecycle (T3.4, T3.6)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -66,45 +67,40 @@ def _generate_training_script(run_dir: Path, config_json: dict[str, Any]) -> Pat
     return output
 
 
-def _run_training_process(run_id: str, run_dir: Path) -> None:
-    """Background task: generate script + run training subprocess."""
+async def _run_training_process(run_id: str, run_dir: Path) -> None:
+    """Async background task: run training subprocess, update DB when done."""
     import sqlite3 as sq
-    
-    # Connect to DB
-    conn = sq.connect(str(config.DATA_DIR / "examples.db"))
-    conn.row_factory = sq.Row
+    log_path = run_dir / "training.log"
     
     try:
         # Update status to running
+        conn = sq.connect(str(config.DATA_DIR / "examples.db"))
         conn.execute("UPDATE training_runs SET status = ? WHERE run_id = ?", ("running", run_id))
         conn.commit()
-        
-        # Generate training script
-        config_json = json.loads(
-            conn.execute("SELECT config_json FROM training_runs WHERE run_id = ?", (run_id,)).fetchone()["config_json"]
-        )
         conn.close()
         
-        script_path = _generate_training_script(run_dir, config_json)
+        # Find training script
+        script_path = run_dir / "train.py"
+        if not script_path.exists():
+            raise FileNotFoundError(f"train.py not found at {script_path}")
         
-        # Start training subprocess
-        proc = subprocess.Popen(
-            [sys.executable, str(script_path)],
+        # Run training asynchronously — output to log file
+        log_fh = open(log_path, "w", encoding="utf-8")
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, str(script_path),
             cwd=str(run_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
+            stdout=log_fh,
+            stderr=asyncio.subprocess.STDOUT,
         )
         _active_processes[run_id] = proc
         
-        # Wait for completion
-        stdout, _ = proc.communicate()
+        # Wait for completion (non-blocking for event loop)
+        returncode = await proc.wait()
+        log_fh.close()
         
         # Update DB with result
         conn = sq.connect(str(config.DATA_DIR / "examples.db"))
-        conn.row_factory = sq.Row
-        
-        if proc.returncode == 0:
+        if returncode == 0:
             conn.execute(
                 "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
                 ("completed", _now_iso(), run_id),
@@ -114,33 +110,36 @@ def _run_training_process(run_id: str, run_dir: Path) -> None:
                 "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
                 ("failed", _now_iso(), run_id),
             )
-            # Write error log
-            (run_dir / "error.log").write_text(stdout, encoding="utf-8")
-        
         conn.commit()
         conn.close()
         
     except Exception as e:
-        conn = sq.connect(str(config.DATA_DIR / "examples.db"))
-        conn.execute(
-            "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
-            ("failed", _now_iso(), run_id),
-        )
-        conn.commit()
-        conn.close()
-        (run_dir / "error.log").write_text(str(e), encoding="utf-8")
+        # Write error to log
+        log_path.write_text(f"Training process error: {e}", encoding="utf-8")
+        # Update status to failed
+        try:
+            conn = sq.connect(str(config.DATA_DIR / "examples.db"))
+            conn.execute(
+                "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
+                ("failed", _now_iso(), run_id),
+            )
+            conn.commit()
+            conn.close()
+        except:
+            pass
     finally:
         _active_processes.pop(run_id, None)
 
 
-def create_run(
+def create_run_sync(
     conn: sqlite3.Connection,
     config_json: dict[str, Any],
     dataset_version: str = "",
 ) -> dict[str, Any]:
-    """Create a new training run record and set up its output directory.
+    """Create a new training run record (synchronous version for async endpoints).
     
-    Immediately generates training script and starts training in background thread.
+    Generates training script immediately but does NOT start training.
+    The caller is responsible for starting the background process.
     """
     run_id = _next_run_id(conn)
     now = _now_iso()
@@ -167,15 +166,37 @@ def create_run(
     # Generate training script
     _generate_training_script(run_dir, config_json)
 
-    # Start training in background thread
-    import threading
-    t = threading.Thread(target=_run_training_process, args=(run_id, run_dir), daemon=True)
-    t.start()
-
     row = conn.execute(
         "SELECT * FROM training_runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     return _row_to_dict(row)
+
+
+def create_run(
+    conn: sqlite3.Connection,
+    config_json: dict[str, Any],
+    dataset_version: str = "",
+) -> dict[str, Any]:
+    """Create a new training run record and set up its output directory.
+    
+    Immediately generates training script and starts training in background thread.
+    """
+    record = create_run_sync(conn, config_json, dataset_version)
+
+    # Start training in background (async task)
+    run_id = record["run_id"]
+    runs_dir = _runs_dir() / run_id
+    import asyncio
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run_training_process(run_id, runs_dir))
+    except RuntimeError:
+        # No running loop — use threading
+        import threading
+        t = threading.Thread(target=_run_training_process, args=(run_id, runs_dir), daemon=False)
+        t.start()
+
+    return record
 
 
 def start_run(run_id: str) -> None:
