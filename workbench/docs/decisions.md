@@ -10,6 +10,8 @@
 - Llama-3.1-8B-Instruct — ต้องใช้ tool template แยก, คุณภาพ tool use ต่ำกว่า
 
 **ตัดสินใจ:** เริ่มที่ Hermes 2 Pro Llama-3 8B และรองรับ Qwen2.5-7B เป็น adapter ที่สอง
+
+**เหตุผลที่เลือก 8B แทน 7B:** แผนเดิมระบุ 7B แต่ D1 เลือก 8B เพราะ (1) Hermes-2-Pro-Llama-3-8B มี training data ที่เน้น function calling มากกว่า ซึ่งเป็นเป้าหมายหลักของโปรเจค; (2) สถาปัตยกรรม ModelAdapter แยกทุกอย่างที่ขึ้นกับโมเดลออกจาก validator/API/pipeline ทำให้เปลี่ยนขนาดโมเดลได้โดยไม่แก้โค้ดส่วนอื่น; (3) VRAM 12 GB พอเพียงสำหรับ QLoRA fine-tune 8B ร่วมกับ gradient checkpointing. หากต้องการ 7B จริง ๆ ให้ใช้ `Hermes-2-Pro-Mistral-7B` หรือ `Qwen2.5-7B-Instruct` เป็น adapter ตัวใหม่ ไม่ต้องแก้ pipeline.
 **เหตุผล:** ผู้ใช้ต้องการระบบที่เปลี่ยนโมเดลได้ ไม่ผูกกับโมเดลใดโมเดลหนึ่ง — สถาปัตยกรรม
 `ModelAdapter` แยกทุกอย่างที่ขึ้นกับโมเดล (template, รูปแบบ tool call, tokenizer) ออกจาก
 validator/API/pipeline ทั้งหมด การเพิ่มโมเดลใหม่ = เพิ่มไฟล์ adapter 1 ไฟล์ + template

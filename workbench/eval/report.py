@@ -22,7 +22,7 @@ GATE_LIMITS: dict[str, tuple[float, float | None]] = {
     "json_validity": (100.0, None),
     "plan_json": (100.0, None),
     "speed_8k": (30.0, None),
-    "regression": (97.0, None),  # candidate/base pass@1 ratio; >=97% means regression within ~3 pts
+    "regression": (97.0, None),  # ratio = 100*candidate/base; 97% ≈ 3 pts regression when base acc is high (~95%+). Align with Plan/00-overview acceptance criterion.
     "end_to_end": (100.0, None),
 }
 
