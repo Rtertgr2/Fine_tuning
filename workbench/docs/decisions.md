@@ -157,4 +157,13 @@ PYTHONPATH=. .venv/bin/python eval/runners/run_baseline.py --model "Hermes-2-Pro
 
 **ข้อจำกัดที่ยังเปิดอยู่ (ห้ามตีความว่าพร้อม production):** regression runner (HumanEval+/MBPP+), E2E runner และ UI หน้าประเมิน/deploy/case queue ยังไม่ครบ; sandbox ยังไม่ใช่ Docker/no-network container; การรัน baseline จริงต้องใช้ llama-server และ GPU; ต้องทำ template-parity และ deployment บนฮาร์ดแวร์เป้าหมายก่อน G3
 
-**ยืนยันล่าสุด:** `238 passed` ด้วย `workbench/.venv/bin/python -m pytest workbench/tests/` (มี Starlette/httpx deprecation warning 1 รายการ)
+## D11. Intel Arc GPU Runtime vertical slice — 2026-09-24
+
+- Host kernel driver อยู่บน host; ใช้ image ที่ pin ไว้ `intel/pytorch:xpu-2.13.0-ubuntu24.04` สำหรับ user-space XPU stack
+- Compose map เฉพาะ `/dev/dri/renderD128`, ใช้ user/group ของ host, bind API ที่ `127.0.0.1:8300`, ไม่ใช้ `privileged` หรือ Docker socket
+- เพิ่ม `GET /gpu/devices`, `GET /gpu/runtimes`, PF0/PF7/PF8 และแสดง GPU ใน training UI; Intel XPU เป็น runtime เดียวที่เปิดใช้, NVIDIA/AMD/CPU training ยัง fail-closed/planned
+- Generated training script เลือก XPU ก่อน CUDA, เก็บ runtime/driver/PyTorch ใน run manifest และ parse config ผ่าน JSON เพื่อรักษา boolean; profile UI เริ่มที่ NF4, batch=1, grad_accum=8, seq=2048
+- ตรวจบน Intel Arc B580: PyTorch `2.13.0+xpu`, bitsandbytes `0.50.2`, Level Zero driver/runtime `1.17.39395+13`; 4-bit NF4 double-quant kernel ผ่าน และ tiny local Llama QLoRA สร้าง metrics/checkpoint/adapter ได้จริงบน XPU
+- ยังไม่ถือว่าแผนเสร็จ: ยังไม่มี GPU service แยก, job allocation/per-run container/stop-resume API, NVIDIA/AMD, และยังไม่ทดสอบ full Hermes-2-Pro-8B; PF/data gates อื่นยังอาจ block run จริง
+
+**ผลทดสอบล่าสุด (2026-09-24):** `253 passed` ด้วย `workbench/.venv/bin/python -m pytest workbench/tests/` (มี Starlette/httpx deprecation warning 1 รายการ)

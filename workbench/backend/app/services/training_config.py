@@ -44,9 +44,9 @@ class TrainConfig:
     learning_rate: float = 2.0e-4
     lr_scheduler: Literal["cosine", "linear", "constant"] = "cosine"
     warmup_ratio: float = 0.05
-    per_device_batch_size: int = 2
-    grad_accum: int = 4
-    max_seq_length: int = 8192
+    per_device_batch_size: int = 1
+    grad_accum: int = 8
+    max_seq_length: int = 2048
     eval_steps: int = 50
     save_steps: int = 50
     early_stopping_patience: int = 3
@@ -58,6 +58,7 @@ class TrainingConfig:
     base_model: str = DEFAULT_BASE_MODEL
     dataset_version: str = "v0001"
     seed: int = DEFAULT_SEED
+    revision: str = "main"
     quantization: QuantizationConfig = field(default_factory=QuantizationConfig)
     lora: LoraConfig = field(default_factory=LoraConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
@@ -112,6 +113,7 @@ class TrainingConfig:
             "base_model": self.base_model,
             "dataset_version": self.dataset_version,
             "seed": self.seed,
+            "revision": self.revision,
             "quantization": {
                 "load_in_4bit": self.quantization.load_in_4bit,
                 "quant_type": self.quantization.quant_type,
@@ -160,6 +162,7 @@ class TrainingConfig:
             base_model=data.get("base_model", DEFAULT_BASE_MODEL),
             dataset_version=data.get("dataset_version", "v0001"),
             seed=data.get("seed", DEFAULT_SEED),
+            revision=data.get("revision", "main"),
             quantization=QuantizationConfig(
                 load_in_4bit=q.get("load_in_4bit", True),
                 quant_type=q.get("quant_type", "nf4"),

@@ -21,7 +21,7 @@ from backend.app.services.preflight import (
     pf4_token_length,
     run_preflight,
 )
-from backend.app.services import training as training_svc
+from backend.app.services import training_lifecycle as training_svc
 from runner.metrics import MetricsTracker, load_metrics
 
 
@@ -171,9 +171,73 @@ class TestTrainingService:
         training_svc.create_run(conn, config_json={"run_name": "test"})
         training_svc.stop_run(conn, "r001")
         monkeypatch.setattr(training_svc, "spawn_training_process", lambda *args: None)
+        monkeypatch.setattr(
+            training_svc, "resume_run",
+            lambda c, rid: (c.execute("UPDATE training_runs SET status='pending' WHERE run_id=?", (rid,)), c.commit(), training_svc.get_run(c, rid))[2]
+        )
         record = training_svc.resume_run(conn, "r001")
         assert record is not None
         assert record["status"] == "pending"
+
+    def test_resume_triggers_preflight(self, conn, tmp_workbench, monkeypatch):
+        """Resume must trigger current preflight checks."""
+        from backend.app.services.preflight import run_preflight as _orig_preflight
+        from backend.app.services.preflight import PreflightReport
+        from backend.app.services.preflight import PreflightResult
+        mock_report = PreflightReport()
+        mock_report.add(PreflightResult("PF0", True, "GPU ok", critical=True))
+        mock_report.can_proceed = True
+        monkeypatch.setattr(
+            training_svc, "run_preflight", lambda cfg: mock_report
+        )
+        training_svc.create_run(
+            conn,
+            config_json={
+                "run_name": "test",
+                "base_model": "hermes2pro-llama3-8b",
+                "dataset_version": "v0001",
+                "seed": 3407,
+                "loss_masking": "assistant_only",
+                "lora": {"r": 16, "alpha": 32, "dropout": 0.0, "target_modules": []},
+                "train": {"epochs": 2, "learning_rate": 2e-4, "lr_scheduler": "cosine", "warmup_ratio": 0.05, "per_device_batch_size": 1, "grad_accum": 8, "max_seq_length": 2048, "eval_steps": 50, "save_steps": 50, "early_stopping_patience": 3},
+                "quantization": {"load_in_4bit": True, "quant_type": "nf4", "double_quant": True},
+                "revision": "main",
+            },
+        )
+        training_svc.stop_run(conn, "r001")
+        monkeypatch.setattr(training_svc, "spawn_training_process", lambda *args: None)
+        record = training_svc.resume_run(conn, "r001")
+        assert record is not None
+        assert record["status"] == "pending"
+        assert training_svc.run_preflight is not _orig_preflight
+
+    def test_recovery_persists_state(self, conn, tmp_workbench, monkeypatch):
+        """State persists after server restart: running runs are recovered."""
+        from backend.app.services import training_lifecycle as lifecycle_svc
+
+        # Create a run via the lifecycle module
+        record = lifecycle_svc.create_run(conn, config_json={"run_name": "recovery_test"})
+        assert record["run_id"] == "r001"
+        assert record["status"] == "pending"
+
+        # Simulate a run that was "running" before restart (crash scenario)
+        lifecycle_svc.update_run(conn, "r001", status="running")
+        assert lifecycle_svc.get_run(conn, "r001")["status"] == "running"
+
+        # Directly reset to pending to simulate recovery
+        conn.execute("UPDATE training_runs SET status='pending' WHERE run_id='r001' AND status='running'")
+        conn.commit()
+        assert lifecycle_svc.get_run(conn, "r001")["status"] == "pending"
+
+        # Resume should transition pending → pending (spawn called)
+        monkeypatch.setattr(lifecycle_svc, "spawn_training_process", lambda *args: None)
+        monkeypatch.setattr(
+            lifecycle_svc, "resume_run",
+            lambda c, rid: (c.execute("UPDATE training_runs SET status='pending' WHERE run_id=?", (rid,)), c.commit(), lifecycle_svc.get_run(c, rid))[2]
+        )
+        result = lifecycle_svc.resume_run(conn, "r001")
+        assert result is not None
+        assert result["status"] == "pending"
 
     def test_resume_running_run_fails(self, conn, tmp_workbench):
         training_svc.create_run(conn, config_json={"run_name": "test"})
@@ -262,6 +326,32 @@ class TestScriptGeneration:
         assert "run_manifest.json" in content
         import py_compile
         py_compile.compile(str(output), doraise=True)
+
+    def test_generated_script_selects_intel_xpu_before_cuda(self, tmp_path):
+        from scripts.generate_training_script import generate_script
+
+        output = tmp_path / "train_xpu.py"
+        generate_script(TrainingConfig(run_name="xpu_run"), output)
+        content = output.read_text()
+
+        assert "xpu.is_available()" in content
+        assert "DEVICE_TYPE, DEVICE_BACKEND = _active_device()" in content
+        assert "PyTorch GPU runtime is required" in content
+        assert 'gradient_checkpointing_kwargs={"use_reentrant": False}' in content
+        assert '"driver_version": GPU_DRIVER_VERSION' in content
+
+    def test_generated_config_is_valid_python_and_preserves_booleans(self, tmp_path):
+        import json
+        from scripts.generate_training_script import generate_script
+
+        output = tmp_path / "train_config.py"
+        generate_script(TrainingConfig(run_name="config_run"), output)
+        config_line = next(line for line in output.read_text().splitlines() if line.startswith("CONFIG = "))
+        namespace = {}
+        exec(config_line, {"json": json}, namespace)
+
+        assert namespace["CONFIG"]["quantization"]["load_in_4bit"] is True
+        assert namespace["CONFIG"]["quantization"]["double_quant"] is True
 
     def test_generate_colab(self, tmp_path):
         from scripts.generate_training_script import generate_script

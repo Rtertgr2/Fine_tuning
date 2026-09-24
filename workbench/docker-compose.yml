@@ -1,0 +1,51 @@
+services:
+  workbench:
+    build:
+      context: .
+      dockerfile: containers/intel/Dockerfile
+      args:
+        INTEL_PYTORCH_IMAGE: ${INTEL_PYTORCH_IMAGE:-intel/pytorch:xpu-2.13.0-ubuntu24.04}
+    image: fine-tuning-workbench:intel-xpu-2.13.0
+    container_name: fine-tuning-workbench
+    init: true
+    restart: unless-stopped
+    user: "${WORKBENCH_UID:-1000}:${WORKBENCH_GID:-1001}"
+    group_add:
+      - "${GPU_RENDER_GID:-989}"
+      - "${GPU_VIDEO_GID:-986}"
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    volumes:
+      - /dev/dri/by-path:/dev/dri/by-path:ro
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./backend:/app/backend:ro
+      - ./frontend:/app/frontend:ro
+      - ./scripts:/app/scripts:ro
+      - ./runner:/app/runner:ro
+      - ./eval:/app/eval
+    ports:
+      - "127.0.0.1:8300:8300"
+    environment:
+      WORKBENCH_DATA_DIR: /app/data
+      WORKBENCH_DB: /app/data/examples.db
+      WORKBENCH_TOKENIZERS_DIR: /app/models/tokenizers
+      WORKBENCH_MODELS_DIR: /app/models
+      HF_HOME: /app/data/cache/huggingface
+      PYTHONPATH: /app
+      PYTHONUNBUFFERED: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      ONEAPI_DEVICE_SELECTOR: level_zero:0
+      ZE_AFFINITY_MASK: "0"
+      DISABLE_XFORMERS: "1"
+    shm_size: 2gb
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8300/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

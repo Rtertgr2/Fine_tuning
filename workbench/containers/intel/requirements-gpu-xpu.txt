@@ -1,0 +1,14 @@
+# Intel PyTorch/XPU is provided by the pinned intel/pytorch base image.
+# Keep this list free of torch so pip cannot replace the XPU wheel with CUDA/CPU.
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.9,<3
+jinja2>=3.1,<4
+PyYAML>=6,<7
+httpx>=0.27,<1
+huggingface_hub>=0.26,<1
+transformers>=4.45,<6
+accelerate>=1.11,<2
+datasets>=4.4,<5
+peft>=0.17,<1
+bitsandbytes==0.50.2

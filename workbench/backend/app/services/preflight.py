@@ -1,8 +1,11 @@
-"""Pre-flight checks PF1-PF6 (T3.2)."""
+"""Pre-flight checks PF0-PF8 (GPU runtime and training gates)."""
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
+import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
@@ -10,6 +13,7 @@ from typing import Any, Sequence
 from backend.adapters.registry import adapter_for_model_id, get_adapter
 from backend.app import config
 from backend.app.services import datasets as ds_service
+from backend.app.services.gpu_runtime import get_gpu_devices
 from backend.app.services.training_config import TrainingConfig
 
 
@@ -517,19 +521,122 @@ def pf6_library_versions(cfg: TrainingConfig) -> PreflightReport:
 
 
 # ---------------------------------------------------------------------------
+# PF0: A usable GPU runtime is present
+# ---------------------------------------------------------------------------
+
+def pf0_gpu_detection(cfg: TrainingConfig, devices: list[dict[str, Any]] | None = None) -> PreflightReport:
+    """Require a GPU visible to the active PyTorch runtime before training."""
+    del cfg
+    from backend.app.services.gpu_runtime import get_gpu_devices
+    detected = get_gpu_devices() if devices is None else list(devices)
+    ready = next((d for d in detected if d.get("status") == "ready"), None)
+    report = PreflightReport()
+    if ready is None:
+        report.add(PreflightResult(
+            "PF0", False,
+            "No usable GPU runtime detected; launch with a supported GPU container",
+            details={"devices": detected, "runtime": "none"}, critical=True,
+        ))
+    else:
+        report.add(PreflightResult(
+            "PF0", True,
+            f"GPU runtime detected: {ready.get('name', 'unknown')}",
+            details={"device": ready, "runtime": ready.get("runtime", "xpu")},
+            critical=True,
+        ))
+    return report
+
+
+# ---------------------------------------------------------------------------
+# PF7: GPU device-node mapping and accessibility
+# ---------------------------------------------------------------------------
+
+def pf7_gpu_device_access(
+    cfg: TrainingConfig,
+    devices: list[dict[str, Any]] | None = None,
+    device_root: Path | None = None,
+) -> PreflightReport:
+    """Verify GPU device nodes are accessible inside the container."""
+    del cfg
+    import os
+    report = PreflightReport()
+    root = device_root or Path("/dev/dri")
+    if device_root:
+        device_nodes = [root / "dri" / "renderD128"]
+    else:
+        device_nodes = [root / "renderD128"]
+    accessible = [str(d) for d in device_nodes if d.exists()]
+    missing = [str(d) for d in device_nodes if not d.exists()]
+    if not accessible:
+        report.add(PreflightResult(
+            "PF7", False,
+            f"GPU device nodes not accessible: {missing}",
+            details={"accessible_nodes": [], "missing": missing}, critical=True,
+        ))
+    else:
+        report.add(PreflightResult(
+            "PF7", True,
+            "GPU device nodes are accessible",
+            details={"accessible_nodes": accessible, "missing": []},
+        ))
+    return report
+
+
+# ---------------------------------------------------------------------------
+# PF8: Framework/runtime compatibility for GPU training
+# ---------------------------------------------------------------------------
+
+def pf8_framework_compatibility(
+    cfg: TrainingConfig,
+    devices: list[dict[str, Any]] | None = None,
+) -> PreflightReport:
+    """Verify the framework/runtime is compatible with GPU training."""
+    del cfg
+    del devices  # devices is for future extension; framework check is host-level
+    import importlib
+    report = PreflightReport()
+    errors = []
+    try:
+        import torch
+        if not hasattr(torch, 'xpu') or not torch.xpu.is_available():
+            try:
+                if not torch.cuda.is_available():
+                    errors.append("Neither XPU nor CUDA GPU is available in PyTorch")
+            except Exception:
+                pass
+    except Exception as exc:
+        errors.append(f"GPU framework unavailable: {exc}")
+    if errors:
+        report.add(PreflightResult(
+            "PF8", False,
+            f"Framework/runtime compatibility issue: {'; '.join(errors)}",
+            details={"errors": errors}, critical=True,
+        ))
+    else:
+        report.add(PreflightResult(
+            "PF8", True,
+            "Framework/runtime is compatible with GPU training",
+        ))
+    return report
+
+
+# ---------------------------------------------------------------------------
 # Run all preflight checks
 # ---------------------------------------------------------------------------
 
 def run_preflight(cfg: TrainingConfig) -> PreflightReport:
-    """Run all pre-flight checks PF1-PF6; any critical failure locks launch."""
+    """Run all pre-flight checks PF0-PF8; any critical failure locks launch."""
     report = PreflightReport()
     for check in (
+        pf0_gpu_detection,
         pf1_dataset_hash,
         pf2_render_samples,
         pf3_loss_mask,
         pf4_token_length,
         pf5_dry_run,
         pf6_library_versions,
+        pf7_gpu_device_access,
+        pf8_framework_compatibility,
     ):
         try:
             part = check(cfg)

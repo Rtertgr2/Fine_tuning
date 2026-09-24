@@ -1,0 +1,5 @@
+{
+  "runtime": "xpu",
+  "device_name": "Intel(R) Arc(TM) B580 Graphics",
+  "torch_version": "2.13.0+xpu"
+}

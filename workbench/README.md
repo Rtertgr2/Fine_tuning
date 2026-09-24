@@ -2,7 +2,7 @@
 
 วงจรเตรียมข้อมูล → เทรน → ประเมิน → deploy → เก็บเคสผิดพลาด สำหรับ fine-tune โมเดล agent (Plan → Code → Review) บนเครื่องเป้าหมาย VRAM 12 GB
 
-> **สถานะ ณ 2026-09-23: prototype ที่มีโครง backend หลาย phase แต่ยังไม่พร้อม production** — ต้องมี GPU/llama-server เพื่อวัดผลจริง และ eval gate จะปิดการ promote ไว้จนกว่าจะมีผล regression + end-to-end ครบ ดู `docs/decisions.md` และ `docs/execution-plan.md` ประกอบ
+> **สถานะ ณ 2026-09-23: prototype ที่มีโครง backend หลาย phase แต่ยังไม่พร้อม production** — ต้องมี GPU/llama-server เพื่อวัดผลจริง และ eval gate จะปิดการ promote ไว้จนกว่าจะมีผล regression + end-to-end ครบ ดู `docs/decisions.md` และ `Plan/08-execution-plan.md` ประกอบ
 
 ## สถานะตามแผน
 
@@ -10,14 +10,14 @@
 |---|---|---|
 | 1 Dataset Studio | ✅ | Validator, CRUD, group-aware split, manifest และ UI editor |
 | 2 Data Pipeline | ⚠️ | Generators/review queue มีแล้ว; sandbox ปัจจุบันเป็น temp-directory isolation ใน process ไม่ใช่ Docker container ที่ตัด network จึงห้ามใช้กับโค้ดที่ไม่น่าเชื่อถือ |
-| 3 Training Launcher | ⚠️ | สร้างสคริปต์, metrics, checkpoint/resume และ PF1–PF6; PF5 ต้องใช้ CUDA จริงและรัน 10 steps |
+| 3 Training Launcher | ⚠️ | สร้างสคริปต์, metrics, checkpoint/resume และ PF0–PF8; Intel XPU บน Arc B580 ใช้งานได้ใน Compose แล้ว แต่ยังไม่มี per-run container orchestration และ full 8B run |
 | 4 Eval Harness | ⚠️ | 5 frozen suites และ runner บางด่าน; HumanEval+/MBPP+ regression กับ E2E runner ยังไม่ครบ รายงานจะ fail-closed และ block production |
 | 5 Deploy | ✅ | ตรวจ GGUF magic/hash, registry, candidate-gated promote, `models/current` symlink และ rollback; ต้องติดตั้ง llama.cpp เอง |
 | 6 Active Learning | ✅ | Redact log, validate ก่อน approve, คุมสัดส่วน AL และแยก regression ตามกลุ่ม session/project |
 | 7 UI v1 | ⚠️ | หน้า HTML มีภาพรวม, ตัวอย่าง และเทรน; หน้า eval/deploy/case queue ยังไม่ครบตาม UI plan |
-| 8 Execution Plan | ✅ | ตารางงานและ Go/No-go อยู่ใน `docs/execution-plan.md` |
+| 8 Execution Plan | ✅ | ตารางงานและ Go/No-go อยู่ใน `Plan/08-execution-plan.md` |
 
-**ผลทดสอบล่าสุด: 238 passed** (`.venv/bin/python -m pytest tests/`). มี warning จาก `starlette.testclient`/`httpx` ที่ยังไม่กระทบผลเทสต์
+**ผลทดสอบล่าสุด: 253 passed** (`.venv/bin/python -m pytest tests/`). มี deprecation warning จาก `starlette.testclient`/`httpx` ที่ยังไม่กระทบผลเทสต์
 
 ## หลักการออกแบบ
 
@@ -47,17 +47,28 @@ scripts/           # training-script generation, merge/quantize/deploy
 
 ## เริ่มใช้งาน
 
+GPU training บน Intel Arc ให้ใช้ Compose profile (host ต้องมี kernel driver และ `/dev/dri/renderD128`; container ใช้เฉพาะ user-space PyTorch/XPU):
+
 ```bash
 cd workbench
-.venv/bin/python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8300
+~/bin/cup.sh "$PWD"
 
 # UI:  http://127.0.0.1:8300/ui/
 # API: http://127.0.0.1:8300/docs
-# tests
+# stop cleanly
+~/bin/cdown.sh "$PWD"
+```
+
+Compose ใช้ image `intel/pytorch:xpu-2.13.0-ubuntu24.04`, expose `/dev/dri/renderD128` โดยไม่ใช้ `privileged` หรือ Docker socket และ bind API ไว้ที่ `127.0.0.1:8300` เท่านั้น ค่า `WORKBENCH_UID`, `WORKBENCH_GID`, `GPU_RENDER_GID` และ `GPU_VIDEO_GID` เปลี่ยนได้ตาม host
+
+สำหรับพัฒนา backend โดยไม่ใช้ GPU:
+
+```bash
+.venv/bin/python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8300
 .venv/bin/python -m pytest tests/
 ```
 
-เมื่อต้องเปิด UI ผ่าน reverse proxy ให้ใช้ same-origin และอย่าเปิด service สู่ public network โดยไม่มี authentication
+เมื่อต้องเปิด UI ผ่าน reverse proxy ให้ใช้ same-origin และอย่าเปิด service สู่ public network โดยไม่มี authentication.
 
 ## Gold set และชุดข้อมูล
 
@@ -67,9 +78,13 @@ Dataset v0001 เดิม: seed=42, 97 train / 11 val, group leakage = 0
 
 ## Training
 
-สร้าง run จะทำ PF1–PF6 ก่อนเริ่ม โดย PF5 ต้องใช้ GPU/CUDA บนเครื่องที่รัน workbench หากไม่มี GPU จะรายงานว่าไม่พร้อมและไม่เริ่มเทรน
+ก่อนสร้าง run ระบบตรวจ PF0–PF8: runtime GPU, device-node permissions, XPU/PyTorch/bitsandbytes 4-bit kernel และ PF1–PF6 เดิม; ถ้า gate สำคัญไม่ผ่านจะ fail-closed
 
-สคริปต์ที่สร้างจะเขียน `config.yaml`, `dataset_manifest.json`, `run_manifest.json`, `env.txt`, `metrics.jsonl`, checkpoint, adapter และ `report.md`; loss labels สร้างเฉพาะช่วง assistant ทุก turn (ไม่ใช้ marker ที่ hardcode เฉพาะ Hermes)
+บน Arc B580 ค่าเริ่มต้นใน UI ใช้ QLoRA NF4 + double quant, batch 1, gradient accumulation 8 และ sequence length 2048 เป็น profile เริ่มต้นสำหรับ VRAM 12 GB; ปรับเพิ่มได้เมื่อ preflight ผ่าน สคริปต์เลือก `torch.xpu` ก่อน CUDA และเก็บ runtime/driver/PyTorch ใน `run_manifest.json` กับ `gpu_runtime.json`
+
+สคริปต์ที่สร้างเขียน `config.yaml`, `dataset_manifest.json`, `run_manifest.json`, `gpu_runtime.json`, `env.txt`, `metrics.jsonl`, checkpoint, adapter และ `report.md`; loss labels สร้างเฉพาะช่วง assistant ทุก turn (ไม่ใช้ marker ที่ hardcode เฉพาะ Hermes)
+
+ทดสอบ XPU smoke run แล้วด้วย tiny local Llama และได้ metrics/checkpoint/adapter; ยังไม่ได้รัน Hermes-2-Pro-8B เต็ม และข้อจำกัด preflight/data เดิมยังอาจ block run จริงได้.
 
 ## Eval Harness
 

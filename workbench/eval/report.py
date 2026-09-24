@@ -22,7 +22,7 @@ GATE_LIMITS: dict[str, tuple[float, float | None]] = {
     "json_validity": (100.0, None),
     "plan_json": (100.0, None),
     "speed_8k": (30.0, None),
-    "regression": (97.0, None),  # candidate/base pass@1 ratio, not absolute score
+    "regression": (97.0, None),  # candidate/base pass@1 ratio; >=97% means regression within ~3 pts
     "end_to_end": (100.0, None),
 }
 
@@ -139,6 +139,9 @@ def generate(
     *,
     baseline: dict[str, Any] | None = None,
     previous: dict[str, Any] | None = None,
+    model_id: str | None = None,
+    revision: str | None = None,
+    artifact_hash: str | None = None,
 ) -> dict[str, Any]:
     """Generate a report. Missing mandatory measurements fail the overall gate.
 
@@ -207,6 +210,9 @@ def generate(
     report = {
         "run_id": run_id,
         "model": model_name,
+        "model_id": model_id or model_name,
+        "revision": revision,
+        "artifact_hash": artifact_hash,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "config": {
             "temperature": EC.temperature,

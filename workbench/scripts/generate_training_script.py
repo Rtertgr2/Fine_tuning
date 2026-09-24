@@ -60,7 +60,7 @@ IGNORE_INDEX = -100
 
 # ── Config ─────────────────────────────────────────────────────────────────
 
-CONFIG = {config_json}
+CONFIG = json.loads({config_json})
 
 RUN_NAME = CONFIG["run_name"]
 BASE_MODEL = CONFIG["base_model"]
@@ -74,10 +74,42 @@ CHECKPOINT_DIR = OUTPUT_DIR / "checkpoints"
 METRICS_PATH = OUTPUT_DIR / "metrics.jsonl"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Quantization ─────────────────────────────────────────────────────────────
+# ── GPU runtime and quantization ─────────────────────────────────────────────
 
-USE_BF16 = bool(torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+def _active_device():
+    xpu = getattr(torch, "xpu", None)
+    if xpu is not None:
+        try:
+            if xpu.is_available():
+                return "xpu", xpu
+        except Exception:
+            pass
+    try:
+        if torch.cuda.is_available():
+            return "cuda", torch.cuda
+    except Exception:
+        pass
+    raise RuntimeError("PyTorch GPU runtime is required; no XPU or CUDA device is available")
+
+
+DEVICE_TYPE, DEVICE_BACKEND = _active_device()
+try:
+    USE_BF16 = bool(DEVICE_BACKEND.is_bf16_supported())
+except Exception:
+    USE_BF16 = False
 COMPUTE_DTYPE = torch.bfloat16 if USE_BF16 else torch.float16
+try:
+    GPU_DEVICE_NAME = str(DEVICE_BACKEND.get_device_name(0))
+except Exception:
+    GPU_DEVICE_NAME = f"{{DEVICE_TYPE}}:0"
+try:
+    GPU_PROPERTIES = DEVICE_BACKEND.get_device_properties(0)
+    GPU_DRIVER_VERSION = getattr(GPU_PROPERTIES, "driver_version", None)
+    GPU_RUNTIME_DRIVER = getattr(GPU_PROPERTIES, "platform_name", None)
+except Exception:
+    GPU_DRIVER_VERSION = None
+    GPU_RUNTIME_DRIVER = None
+print(f"Training device: {{GPU_DEVICE_NAME}} ({{DEVICE_TYPE}}), BF16={{USE_BF16}}")
 quant_config = BitsAndBytesConfig(
     load_in_4bit={load_in_4bit},
     bnb_4bit_quant_type="{quant_type}",
@@ -90,14 +122,19 @@ quant_config = BitsAndBytesConfig(
 print(f"Loading model: {{BASE_MODEL}}")
 model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL,
+    revision=CONFIG.get("revision", "main"),
     quantization_config=quant_config,
     device_map="auto",
-    trust_remote_code=True,
+    trust_remote_code=False,
 )
 model.config.use_cache = False
-model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+model = prepare_model_for_kbit_training(
+    model,
+    use_gradient_checkpointing=True,
+    gradient_checkpointing_kwargs={{"use_reentrant": False}},
+)
 
-tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, trust_remote_code=False)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
@@ -136,12 +173,20 @@ if source_manifest.exists():
     import shutil
     shutil.copy2(source_manifest, OUTPUT_DIR / "dataset_manifest.json")
 script_hash = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+gpu_info = {{
+    "runtime": DEVICE_TYPE,
+    "device_name": GPU_DEVICE_NAME,
+    "driver_version": GPU_DRIVER_VERSION,
+    "runtime_driver": GPU_RUNTIME_DRIVER,
+    "torch_version": torch.__version__,
+}}
 run_manifest = {{
     "run_name": RUN_NAME, "base_model": BASE_MODEL, "dataset_version": DATASET_VERSION,
     "seed": SEED, "script_sha256": script_hash, "created_at": time.time(),
-    "python": sys.version, "platform": platform.platform(),
+    "python": sys.version, "platform": platform.platform(), "gpu": gpu_info,
 }}
 (OUTPUT_DIR / "run_manifest.json").write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
+(OUTPUT_DIR / "gpu_runtime.json").write_text(json.dumps(gpu_info, indent=2), encoding="utf-8")
 try:
     freeze = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True, timeout=30)
     (OUTPUT_DIR / "env.txt").write_text(freeze.stdout if freeze.returncode == 0 else freeze.stderr, encoding="utf-8")
@@ -369,7 +414,7 @@ def generate_script(cfg: TrainingConfig, output_path: str | Path, colab: bool = 
 
     script = template.format(
         run_name=cfg.run_name,
-        config_json=json.dumps(cfg.to_dict(), indent=2, ensure_ascii=False),
+        config_json=repr(json.dumps(cfg.to_dict(), ensure_ascii=False)),
         config_yaml=cfg.run_name + ".yaml",
         load_in_4bit=str(cfg.quantization.load_in_4bit),
         quant_type=cfg.quantization.quant_type,

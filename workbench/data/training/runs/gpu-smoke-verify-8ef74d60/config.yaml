@@ -1,0 +1,33 @@
+{
+  "run_name": "gpu-smoke-verify-8ef74d60",
+  "base_model": "/app/data/gpu_smoke/af13f786/tiny-llama",
+  "dataset_version": "gpu-smoke-af13f786",
+  "seed": 3407,
+  "quantization": {
+    "load_in_4bit": true,
+    "quant_type": "nf4",
+    "double_quant": true
+  },
+  "lora": {
+    "r": 4,
+    "alpha": 8,
+    "dropout": 0.0,
+    "target_modules": [
+      "q_proj",
+      "v_proj"
+    ]
+  },
+  "train": {
+    "epochs": 1,
+    "learning_rate": 0.0002,
+    "lr_scheduler": "cosine",
+    "warmup_ratio": 0.05,
+    "per_device_batch_size": 1,
+    "grad_accum": 1,
+    "max_seq_length": 256,
+    "eval_steps": 1,
+    "save_steps": 1,
+    "early_stopping_patience": 3
+  },
+  "loss_masking": "assistant_only"
+}

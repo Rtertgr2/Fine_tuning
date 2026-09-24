@@ -14,6 +14,18 @@ ADAPTERS: dict[str, ModelAdapter] = {
     a.name: a for a in (Hermes2ProLlama3Adapter(), Qwen25Adapter())
 }
 
+# Exact model identity allowlist: model_id -> adapter name.
+# Only exact matches on these IDs are accepted. Substring matching
+# is intentionally removed to prevent false positives on model names
+# that happen to contain a substring of a supported identifier.
+MODEL_ID_ALLOWLIST: dict[str, str] = {
+    "hermes2pro-llama3-8b": "hermes2pro-llama3-8b",
+    "nousresearch/hermes-2-pro-llama-3-8b": "hermes2pro-llama3-8b",
+    "qwen2.5-7b-instruct": "qwen2.5-7b-instruct",
+    "qwen/qwen2.5-7b-instruct": "qwen2.5-7b-instruct",
+    "qwen/qwen2.5-coder-7b-instruct": "qwen2.5-7b-instruct",
+}
+
 DEFAULT_ADAPTER = "hermes2pro-llama3-8b"
 
 
@@ -30,18 +42,21 @@ def get_adapter(name: str | None = None) -> ModelAdapter:
 def adapter_for_model_id(model_id: str | None) -> ModelAdapter:
     """Resolve a HF model name to its locked chat-template/tokenizer adapter.
 
-    Model names from the same supported family (for example Qwen Coder and
-    Qwen Instruct) share the Qwen2.5 template. Unknown families fail closed
-    instead of silently rendering with the active default adapter.
+    Uses exact allowlist matching only — the full model id, adapter name,
+    or hf_repo must match a known entry. Substring matching was removed
+    because it allowed false positives on model names containing only a
+    portion of a supported identifier. Unknown families fail closed.
     """
-    name = (model_id or "").strip().lower()
-    hermes = ADAPTERS["hermes2pro-llama3-8b"]
-    qwen = ADAPTERS["qwen2.5-7b-instruct"]
-    if name in {hermes.name.lower(), hermes.hf_repo.lower()} or "hermes-2-pro-llama-3-8b" in name:
-        return hermes
-    if name in {qwen.name.lower(), qwen.hf_repo.lower()} or "qwen2.5" in name or "qwen-2.5" in name:
-        return qwen
-    raise KeyError(f"no registered chat-template adapter for base model {model_id!r}")
+    if not model_id:
+        raise KeyError("model_id must be provided")
+    key = model_id.strip().lower()
+    adapter_name = MODEL_ID_ALLOWLIST.get(key)
+    if adapter_name is None:
+        raise KeyError(
+            f"no registered chat-template adapter for base model {model_id!r}; "
+            f"allowed: {', '.join(sorted(MODEL_ID_ALLOWLIST))}"
+        )
+    return ADAPTERS[adapter_name]
 
 
 def list_adapters() -> list[dict[str, str]]:

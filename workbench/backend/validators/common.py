@@ -128,15 +128,17 @@ class C4_MaxTokens:
         return []
 
 
-_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("private_key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("aws_secret_key", re.compile(r"[A-Za-z0-9/+=]{40}")),
     ("OpenAI-style key", re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}\b")),
     ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9\-]{10,}\b")),
     ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
     ("JWT", re.compile(r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b")),
     ("password assignment", re.compile(r"(?i)\b(password|passwd|secret|api[_-]?key)\s*[:=]\s*['\"]?[^\s'\"]{6,}")),
+    ("ip_address", re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")),
 ]
 
 
@@ -155,7 +157,7 @@ class C5_NoSecrets:
         if ex.tools:
             surfaces.append(("tools", json.dumps(ex.tools, ensure_ascii=False)))
         for location, text in surfaces:
-            for label, pattern in _SECRET_PATTERNS:
+            for label, pattern in SECRET_PATTERNS:
                 if pattern.search(text):
                     # Never echo a matched token into API errors, logs, or reports.
                     out.append(v(

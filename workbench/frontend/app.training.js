@@ -12,7 +12,7 @@ const DEFAULT_CFG = {
   lora: { r: 16, alpha: 32, dropout: 0.0, target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"] },
   train: {
     epochs: 2, learning_rate: 2e-4, lr_scheduler: "cosine", warmup_ratio: 0.05,
-    per_device_batch_size: 2, grad_accum: 4, max_seq_length: 8192,
+    per_device_batch_size: 1, grad_accum: 8, max_seq_length: 2048,
     eval_steps: 50, save_steps: 50, early_stopping_patience: 3,
   },
   loss_masking: "assistant_only",
@@ -29,16 +29,18 @@ async function renderTraining() {
   view.append(box);
 
   try {
-    const [datasets, runs, baseModels] = await Promise.all([
+    const [datasets, runs, baseModels, gpuResponse] = await Promise.all([
       api("/datasets"),
       api("/training/runs"),
       api("/training/base-models"),
+      api("/gpu/devices"),
     ]);
     const ds = Array.isArray(datasets) ? datasets : (datasets.items || []);
     const rs = Array.isArray(runs) ? runs : (runs.items || []);
     const bm = Array.isArray(baseModels?.items) ? baseModels.items : [];
+    const gpuDevices = Array.isArray(gpuResponse?.devices) ? gpuResponse.devices : [];
     box.remove();
-    view.append(buildTrainingLayout(ds, rs, bm));
+    view.append(buildTrainingLayout(ds, rs, bm, gpuDevices));
   } catch (e) {
     box.className = "empty";
     box.replaceChildren(
@@ -47,8 +49,30 @@ async function renderTraining() {
   }
 }
 
-function buildTrainingLayout(datasets, runs, baseModels) {
+function buildGpuStatusCard(devices) {
+  const ready = devices.find(device => device.status === "ready");
+  const detected = devices[0];
+  const badge = ready ? "chip-ok" : detected ? "chip-warn" : "chip-err";
+  const label = ready ? "พร้อมใช้" : detected ? "พบ GPU แต่ runtime ยังไม่พร้อม" : "ไม่พบ GPU runtime";
+  const memory = ready?.memory_total_mb
+    ? ` · VRAM ว่าง ${ready.memory_free_mb ?? "—"} / ${ready.memory_total_mb} MiB`
+    : "";
+  const driver = ready?.driver_version ? ` · driver ${ready.driver_version}` : "";
+  const summary = ready
+    ? `${ready.name} · ${ready.runtime}${driver}${memory}`
+    : detected
+      ? `${detected.name} · ${detected.error || "เริ่ม runtime container ที่รองรับ GPU นี้"}`
+      : "Training ถูกปิดกั้นจนกว่า PyTorch จะมองเห็น GPU ผ่าน runtime ที่รองรับ";
+  return h("div", { class: "card", style: "margin-bottom:16px" },
+    h("div", { class: "cat-head" },
+      h("h2", { text: "GPU Runtime" }),
+      h("span", { class: `chip ${badge}`, text: label })),
+    h("p", { class: "hint", text: summary }));
+}
+
+function buildTrainingLayout(datasets, runs, baseModels, gpuDevices = []) {
   const wrap = h("div", { class: "train-layout" });
+  wrap.append(buildGpuStatusCard(gpuDevices));
 
   /* ---- dataset + run selector ---- */
   const dsOptions = datasets.map(d => {
@@ -95,9 +119,9 @@ function buildTrainingLayout(datasets, runs, baseModels) {
         h("option", { value: "linear", text: "linear" }),
         h("option", { value: "constant", text: "constant" }),
       ], ""),
-      fieldNumber("batch_size", "batch_size", 2, "per device"),
-      fieldNumber("grad_accum", "grad_accum", 4, ""),
-      fieldNumber("max_seq", "max_seq_length", 8192, ""),
+      fieldNumber("batch_size", "batch_size", 1, "per device · safe start for 12 GB VRAM"),
+      fieldNumber("grad_accum", "grad_accum", 8, ""),
+      fieldNumber("max_seq", "max_seq_length", 2048, "safe start for Intel Arc 12 GB; increase after preflight"),
       fieldNumber("eval_steps", "eval_steps", 50, ""),
       fieldNumber("save_steps", "save_steps", 50, ""),
       fieldNumber("early_stop", "early_stopping_patience", 3, ""),
@@ -105,6 +129,7 @@ function buildTrainingLayout(datasets, runs, baseModels) {
     h("h3", { text: "Quantization", style: "margin-top:16px" }),
     h("div", { class: "grid-2" },
       fieldCheck("load_4bit", "load_in_4bit", true, "4-bit QLoRA"),
+      fieldCheck("double_quant", "double_quant", true, "ทดสอบผ่านกับ Intel XPU; ช่วยลด VRAM"),
       fieldSelect("quant_type", "quant_type", [
         h("option", { value: "nf4", selected: true, text: "nf4" }),
         h("option", { value: "fp4", text: "fp4" }),
@@ -189,13 +214,13 @@ function readForm() {
     base_model: (str("base_model_select") === "custom" ? str("base_model_custom") : str("base_model_select")) || "NousResearch/Hermes-2-Pro-Llama-3-8B",
     dataset_version: str("dataset") || "v0001",
     seed: 3407,
-    quantization: { load_in_4bit: chk("load_4bit"), quant_type: str("quant_type") || "nf4", double_quant: true },
+    quantization: { load_in_4bit: chk("load_4bit"), quant_type: str("quant_type") || "nf4", double_quant: chk("double_quant") },
     lora: { r: num("lora_r", 16), alpha: num("lora_alpha", 32), dropout: num("lora_dropout", 0), target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"] },
     train: {
       epochs: num("epochs", 2), learning_rate: num("learning_rate", 2e-4),
       lr_scheduler: str("lr_scheduler") || "cosine", warmup_ratio: 0.05,
-      per_device_batch_size: num("batch_size", 2), grad_accum: num("grad_accum", 4),
-      max_seq_length: num("max_seq", 8192), eval_steps: num("eval_steps", 50),
+      per_device_batch_size: num("batch_size", 1), grad_accum: num("grad_accum", 8),
+      max_seq_length: num("max_seq", 2048), eval_steps: num("eval_steps", 50),
       save_steps: num("save_steps", 50), early_stopping_patience: num("early_stop", 3),
     },
     loss_masking: str("loss_masking") || "assistant_only",

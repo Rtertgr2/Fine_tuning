@@ -1,0 +1,7 @@
+{
+  "runtime": "xpu",
+  "device_name": "Intel(R) Arc(TM) B580 Graphics",
+  "driver_version": "1.17.39395+13",
+  "runtime_driver": "Intel(R) oneAPI Unified Runtime over Level-Zero V2",
+  "torch_version": "2.13.0+xpu"
+}

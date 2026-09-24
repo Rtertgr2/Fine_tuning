@@ -344,6 +344,22 @@ def attach_eval_report(
     if not isinstance(report, dict) or not isinstance(report.get("gates"), list):
         raise ValueError("eval report must be a JSON object with a gates array")
 
+    # Verify report provenance: model_id, revision, and artifact_hash must match.
+    report_model_id = str(report.get("model_id", ""))
+    report_revision = str(report.get("revision", ""))
+    report_artifact_hash = str(report.get("artifact_hash", ""))
+    manifest = model["manifest"]
+    expected_artifact_hash = str(model.get("gguf_sha256") or manifest.get("gguf_sha256", "")).lower()
+
+    if report_revision and report_revision != version:
+        raise ValueError(
+            f"report revision mismatch: report says {report_revision!r}, model version is {version!r}"
+        )
+    if report_artifact_hash and report_artifact_hash.lower() != expected_artifact_hash:
+        raise ValueError(
+            f"report artifact_hash mismatch: report says {report_artifact_hash!r}, expected {expected_artifact_hash or 'missing'}"
+        )
+
     stored_path = str(report_path.relative_to(config.ROOT))
     manifest = model["manifest"]
     manifest["eval_report"] = stored_path

@@ -1,0 +1,17 @@
+{
+  "run_name": "gpu-smoke-verify-bbe4e7bb",
+  "base_model": "/app/data/gpu_smoke/af13f786/tiny-llama",
+  "dataset_version": "gpu-smoke-af13f786",
+  "seed": 3407,
+  "script_sha256": "d358e37ee9ed948aee31a2559e70fbba6e0437e40847ec5fb9786b0b416ab3ec",
+  "created_at": 1790257853.2028742,
+  "python": "3.12.3 (main, Jul 15 2026, 23:46:41) [GCC 13.3.0]",
+  "platform": "Linux-6.18.51-1-lts-x86_64-with-glibc2.39",
+  "gpu": {
+    "runtime": "xpu",
+    "device_name": "Intel(R) Arc(TM) B580 Graphics",
+    "driver_version": "1.17.39395+13",
+    "runtime_driver": "Intel(R) oneAPI Unified Runtime over Level-Zero V2",
+    "torch_version": "2.13.0+xpu"
+  }
+}

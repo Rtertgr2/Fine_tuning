@@ -117,7 +117,7 @@ class TestSecretScanning:
         text = "AKIAIOSFODNN7EXAMPLE"
         findings = scan_secrets(text)
         assert len(findings) > 0
-        assert findings[0][0] == "aws_access_key"
+        assert findings[0][0] == "AWS access key"
 
     def test_private_key_detected(self):
         from backend.pipeline.validator import scan_secrets

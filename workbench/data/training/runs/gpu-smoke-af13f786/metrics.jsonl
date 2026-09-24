@@ -1,0 +1,4 @@
+{"step": 1, "eval_loss": 2.4286491870880127, "epoch": 0.3333333333333333, "elapsed_seconds": 1.6801269054412842}
+{"step": 2, "eval_loss": 2.4174652099609375, "epoch": 0.6666666666666666, "elapsed_seconds": 1.7042858600616455}
+{"step": 3, "eval_loss": 2.4058125019073486, "epoch": 1.0, "elapsed_seconds": 1.726073980331421}
+{"step": 3, "epoch": 1.0, "elapsed_seconds": 1.7371063232421875}

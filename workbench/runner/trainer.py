@@ -39,16 +39,52 @@ def _capture_env(output_dir: Path) -> str:
     except Exception:
         lines.append("=== pip freeze: unavailable ===")
 
-    # GPU info
+    # GPU info (Torch XPU, CUDA, or ROCm backend)
+    gpu_info: dict[str, Any] = {"torch_version": None, "runtime": None, "device_name": None}
     try:
         import torch
+        gpu_info["torch_version"] = torch.__version__
         lines.append("\n=== GPU ===")
-        lines.append(f"CUDA available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            lines.append(f"Device: {torch.cuda.get_device_name(0)}")
-            lines.append(f"VRAM total: {torch.cuda.get_device_properties(0).total_mem / 1024**3:.1f} GB")
+        for backend_name in ("xpu", "cuda"):
+            backend = getattr(torch, backend_name, None)
+            if backend is None:
+                continue
+            try:
+                available = bool(backend.is_available())
+            except Exception:
+                available = False
+            if not available:
+                continue
+            hip_version = getattr(getattr(torch, "version", None), "hip", None)
+            runtime = "rocm" if backend_name == "cuda" and hip_version else backend_name
+            name = str(backend.get_device_name(0))
+            gpu_info.update({"runtime": runtime, "device_name": name})
+            lines.extend([f"Runtime: {runtime}", f"Device: {name}"])
+            try:
+                properties = backend.get_device_properties(0)
+                gpu_info.update({
+                    "driver_version": getattr(properties, "driver_version", None),
+                    "runtime_driver": getattr(properties, "platform_name", None),
+                })
+                if gpu_info["driver_version"]:
+                    lines.append(f"Driver/runtime version: {gpu_info['driver_version']}")
+            except Exception:
+                pass
+            try:
+                free_bytes, total_bytes = backend.mem_get_info(0)
+                gpu_info.update({
+                    "memory_total_mb": int(total_bytes // (1024 * 1024)),
+                    "memory_free_mb": int(free_bytes // (1024 * 1024)),
+                })
+                lines.append(f"VRAM total/free: {total_bytes / 1024**3:.1f}/{free_bytes / 1024**3:.1f} GB")
+            except Exception:
+                pass
+            break
+        if gpu_info["runtime"] is None:
+            lines.append("No accelerator backend is available")
     except ImportError:
         lines.append("\n=== GPU: torch not installed ===")
+    (output_dir / "gpu_runtime.json").write_text(json.dumps(gpu_info, indent=2), encoding="utf-8")
 
     content = "\n".join(lines)
     env_path.write_text(content, encoding="utf-8")

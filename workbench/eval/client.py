@@ -5,15 +5,21 @@ from typing import Optional
 
 
 class LlamaClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:8080"):
+    def __init__(self, base_url: str = "http://127.0.0.1:8080",
+                 model: str = "default", revision: str = "main"):
         self.base_url = base_url.rstrip("/")
-    
+        self.model = model
+        self.revision = revision
+
     def chat(self, messages: list, tools: Optional[list] = None,
              temperature: float = 0.0, max_tokens: int = 2048,
-             timeout: int = 120) -> dict:
+             timeout: int = 120, model: Optional[str] = None,
+             revision: Optional[str] = None) -> dict:
         """Call /v1/chat/completions and return parsed result."""
+        effective_model = model or self.model
+        effective_revision = revision or self.revision
         body = {
-            "model": "default",
+            "model": f"{effective_model}:{effective_revision}" if effective_revision else effective_model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,

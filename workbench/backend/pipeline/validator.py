@@ -17,22 +17,11 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from backend.adapters.base import content_hash, jaccard, shingles
+from backend.validators.common import SECRET_PATTERNS
 
 # ---------------------------------------------------------------------------
-# Secret patterns (simplified detect-secrets rules)
+# Secret scanning (uses canonical patterns from backend.validators.common)
 # ---------------------------------------------------------------------------
-
-SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
-    ("aws_secret_key", re.compile(r"[A-Za-z0-9/+=]{40}")),
-    ("private_key", re.compile(r"-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----")),
-    ("github_token", re.compile(r"gh[pousr]_[A-Za-z0-9_]{36,}")),
-    ("slack_token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
-    ("generic_secret", re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"][^'\"]{8,}['\"]")),
-    ("jwt", re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")),
-    ("ip_address", re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")),
-]
-
 
 def scan_secrets(text: str) -> list[tuple[str, str]]:
     """Return list of (pattern_name, matched_text) found in text."""

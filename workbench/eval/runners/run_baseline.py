@@ -31,17 +31,19 @@ def _combine_modes(raw: dict, api: dict, suite: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run all available frozen eval suites")
     parser.add_argument("--model", default=EC.base_model)
+    parser.add_argument("--revision", default="main")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--server", default="http://127.0.0.1:8080")
+    parser.add_argument("--artifact-hash", default=None)
     args = parser.parse_args()
 
     run_id = args.run_id or f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    client = LlamaClient(args.server)
+    client = LlamaClient(args.server, model=args.model, revision=args.revision)
     if not client.health():
         print(f"ERROR: llama-server not reachable at {args.server}")
         return 2
 
-    print(f"=== Eval Harness ===\nModel: {args.model}\nRun ID: {run_id}\nServer: {args.server}\nTemperature: {EC.temperature}\n")
+    print(f"=== Eval Harness ===\nModel: {args.model}\nRevision: {args.revision}\nRun ID: {run_id}\nServer: {args.server}\nTemperature: {EC.temperature}\n")
     results = []
     for title, fn, name in (
         ("Tool syntax (raw tags)", run_tool_syntax, "tool_syntax"),
@@ -80,7 +82,9 @@ def main() -> int:
     # These suites are mandatory for a production report but are not implemented
     # yet; report.generate intentionally fails closed rather than silently
     # marking a partially measured model as promotable.
-    report = generate(results, run_id, args.model)
+    report = generate(results, run_id, args.model,
+                    model_id=args.model, revision=args.revision,
+                    artifact_hash=args.artifact_hash)
     print(f"\nReport: eval/reports/{run_id}/report.html")
     print(f"Overall: {'PASS' if report['overall_pass'] else 'FAIL / INCOMPLETE'}")
     missing = [gate["name"] for gate in report["gates"] if gate["actual"] is None]
