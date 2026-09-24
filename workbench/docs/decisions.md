@@ -142,3 +142,19 @@ PYTHONPATH=. .venv/bin/python eval/runners/run_baseline.py --model "Hermes-2-Pro
 **Critical path:** D1-D11 → T1.0 → T1.2 → T2.2 → T4.3-T4.6 → baseline → pilot → full train
 
 **Scope cut order:** UI v2 → Runner B/dashboard → AL semi-manual → smaller v002 → never cut frozen eval/loss mask/template parity/gate/rollback
+
+## D10. Corrective implementation pass — 2026-09-23
+
+ตรวจโค้ดเทียบ Plan/00–08 และแก้จุดที่ทำให้ gate/การเทรน/การ rollback ให้ผลไม่จริง:
+
+- **Training lifecycle:** แก้ coroutine ที่ถูกส่งเข้า `threading.Thread` โดยไม่ await; การหยุด/จบ run ไม่เขียนทับสถานะ `stopped`; `resume` เปิด process ใหม่จาก checkpoint ได้
+- **Pre-flight:** ปุ่มตรวจไม่สร้าง run; train จะไม่เริ่มหาก PF1–PF5 ที่เป็น critical ไม่ผ่าน; PF2 เทียบ template กับ tokenizer จริง, PF3 สร้าง label mask จาก assistant turns จริง, PF4 ตรวจ train+val, PF5 ต้องผ่าน dry run 10 optimizer steps บน CUDA
+- **Training script:** ใช้ `Trainer` กับ custom assistant-only collator เพื่อให้ mask ได้หลาย assistant turnsและไม่ hardcode ChatML marker; ปรับ eval/save steps ให้มี eval กับ dataset pilot ขนาดเล็ก, ใช้ early stopping, resume checkpoints, เขียน metrics และ manifests
+- **Eval:** แยก judge ออกจาก runner; strict JSON ไม่รับ code fence; ตรวจ nested tool JSON/argument values, REJECT ที่ไม่มี issues จะตก; `--server` ถูกส่งถึง runner; false-positive rate คำนวณเป็นจำนวน FP จริง; report fail-closed เมื่อ regression/E2E/speed หรือ gate อื่นหาย
+- **Model registry/deploy:** ลงทะเบียน candidate ได้เฉพาะ GGUF จริงที่ hash/magic ตรง, เก็บ manifest ข้างไฟล์, แนบรายงาน eval ภายหลังได้, จำกัด report path ไว้ใต้ `eval/reports`, promote/rollback สลับ `models/current` แบบ atomic และตรวจ artifact ก่อน
+- **Active Learning:** ตรวจ validator/secret อีกครั้งก่อน approve, บังคับ second reviewer คนละคนสำหรับ sec, จำกัด AL ไม่เกิน 30%, hash ไฟล์ dataset และ holdout regression เป็นกลุ่ม session/project ทั้งกลุ่ม
+- **Sandbox/pipeline:** ป้องกัน symlink path escape; generator ตรวจ exact/near duplicate, secrets และ overlap กับ frozen eval suites ทั้งในฐานข้อมูลและใน batch เดียวกัน
+
+**ข้อจำกัดที่ยังเปิดอยู่ (ห้ามตีความว่าพร้อม production):** regression runner (HumanEval+/MBPP+), E2E runner และ UI หน้าประเมิน/deploy/case queue ยังไม่ครบ; sandbox ยังไม่ใช่ Docker/no-network container; การรัน baseline จริงต้องใช้ llama-server และ GPU; ต้องทำ template-parity และ deployment บนฮาร์ดแวร์เป้าหมายก่อน G3
+
+**ยืนยันล่าสุด:** `238 passed` ด้วย `workbench/.venv/bin/python -m pytest workbench/tests/` (มี Starlette/httpx deprecation warning 1 รายการ)

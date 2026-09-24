@@ -59,6 +59,24 @@ class TestSandbox:
             result = sb.run("write_file", {"path": ".env", "content": "SECRET=123"}, traj=traj)
             assert "Blocked by policy" in result
 
+    def test_symlink_escape_blocked(self, tmp_path):
+        from backend.tools.sandbox import Sandbox
+
+        workspace = tmp_path / "workspace"
+        outside = tmp_path / "outside.txt"
+        workspace.mkdir()
+        outside.write_text("do not expose", encoding="utf-8")
+        try:
+            (workspace / "escape.txt").symlink_to(outside)
+        except OSError:
+            pytest.skip("symlinks unavailable on this platform")
+        with Sandbox(workspace_root=workspace) as sb:
+            result = sb.run("read_file", {"path": "escape.txt"})
+            assert "Blocked by policy" in result
+            write_result = sb.run("write_file", {"path": "escape.txt", "content": "overwrite"})
+            assert "Blocked by policy" in write_result
+        assert outside.read_text(encoding="utf-8") == "do not expose"
+
     def test_unknown_tool_blocked(self):
         from backend.tools.sandbox import Sandbox, Trajectory
         from backend.app import ids

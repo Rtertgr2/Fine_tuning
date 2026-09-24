@@ -10,6 +10,7 @@ C6  no exact / near duplicates         err / warn
 
 from __future__ import annotations
 
+import json
 import re
 
 from backend.adapters.base import content_hash, jaccard, shingles
@@ -147,21 +148,22 @@ class C5_NoSecrets:
 
     def check(self, ex: Example, ctx: ValidationContext) -> list[Violation]:
         out = []
-        for i, m in enumerate(ex.messages):
-            text = str(m.get("content") or "")
+        surfaces = [
+            (f"messages[{i}]", str(message.get("content") or ""))
+            for i, message in enumerate(ex.messages)
+        ]
+        if ex.tools:
+            surfaces.append(("tools", json.dumps(ex.tools, ensure_ascii=False)))
+        for location, text in surfaces:
             for label, pattern in _SECRET_PATTERNS:
-                match = pattern.search(text)
-                if match:
-                    snippet = match.group(0)
-                    shown = snippet if len(snippet) <= 24 else snippet[:24] + "…"
-                    out.append(
-                        v(
-                            self.code,
-                            self.level,
-                            f"possible secret ({label}) near {shown!r}",
-                            f"messages[{i}]",
-                        )
-                    )
+                if pattern.search(text):
+                    # Never echo a matched token into API errors, logs, or reports.
+                    out.append(v(
+                        self.code,
+                        self.level,
+                        f"possible secret ({label}) detected; value omitted",
+                        location,
+                    ))
         return out
 
 

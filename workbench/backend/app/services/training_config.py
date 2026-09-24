@@ -13,7 +13,7 @@ def _is_power_of_2(n: int) -> bool:
 
 
 # Defaults per Plan/03 §5
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-Coder-7B-Instruct"
+DEFAULT_BASE_MODEL = "NousResearch/Hermes-2-Pro-Llama-3-8B"
 DEFAULT_SEED = 3407
 DEFAULT_MAX_SEQ_LENGTH = 8192
 
@@ -68,6 +68,16 @@ class TrainingConfig:
         errors: list[str] = []
         if not self.run_name or not self.run_name.strip():
             errors.append("run_name must be non-empty")
+        if not self.base_model or not self.base_model.strip():
+            errors.append("base_model must be non-empty")
+        else:
+            from backend.adapters.registry import adapter_for_model_id
+            try:
+                adapter_for_model_id(self.base_model)
+            except KeyError as exc:
+                errors.append(str(exc))
+        if not self.dataset_version or not self.dataset_version.strip():
+            errors.append("dataset_version must be non-empty")
         if not _is_power_of_2(self.lora.r):
             errors.append(f"LoRA r must be a power of 2, got {self.lora.r}")
         if self.lora.alpha <= 0:

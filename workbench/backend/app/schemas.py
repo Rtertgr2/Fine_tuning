@@ -115,9 +115,14 @@ class ModelRegisterIn(BaseModel):
     train_run: str | None = None
     llama_cpp_commit: str | None = None
     quant: QuantLevel = "Q5_K_M"
+    gguf_path: str | None = None
     gguf_sha256: str | None = None
     eval_report: str | None = None
     status: ModelStatus = "candidate"
+
+
+class ModelEvalReportIn(BaseModel):
+    eval_report: str = Field(..., min_length=1)
 
 
 class ModelPromoteIn(BaseModel):
@@ -149,12 +154,14 @@ class PromoteResult(BaseModel):
     new_status: ModelStatus
     previous_production: str | None = None
     gate_passed: bool
+    actions: list[dict[str, Any]] = []
     message: str
 
 
 class RollbackResult(BaseModel):
     version: str
     previous_production: str | None = None
+    actions: list[dict[str, Any]] = []
     message: str
 
 

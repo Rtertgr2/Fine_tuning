@@ -10,6 +10,7 @@ Runs after generation and before review-queue insertion:
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -65,9 +66,16 @@ class ContaminationChecker:
             self._eval_shingles[h] = shingles(text)
 
     def _extract_text(self, example: dict[str, Any]) -> str:
-        """Concatenate all message content for comparison."""
-        messages = example.get("messages", [])
-        return " ".join(m.get("content", "") or "" for m in messages)
+        """Concatenate the example's text content.
+
+        Supports stored examples (messages[]) and frozen eval-suite cases
+        (single `prompt` field).
+        """
+        if isinstance(example.get("messages"), list) and example["messages"]:
+            return " ".join(m.get("content", "") or "" for m in example["messages"])
+        if example.get("prompt"):
+            return str(example["prompt"])
+        return json.dumps(example, ensure_ascii=False, sort_keys=True)
 
     def check(self, candidate: dict[str, Any]) -> ContaminationResult:
         """Check if a candidate overlaps significantly with eval data."""
@@ -97,17 +105,33 @@ class ContaminationChecker:
         eval_examples: list[dict[str, Any]] = []
 
         if eval_path.exists():
-            for suite_file in eval_path.glob("**/*.json"):
+            files = sorted(set(eval_path.glob("**/*.jsonl")))
+            files += sorted(set(eval_path.glob("**/*.json")))
+            for suite_file in files:
                 try:
-                    data = suite_file.read_text(encoding="utf-8")
-                    import json
-                    suite = json.loads(data)
-                    if isinstance(suite, list):
-                        eval_examples.extend(suite)
-                    elif isinstance(suite, dict) and "examples" in suite:
-                        eval_examples.extend(suite["examples"])
-                except (json.JSONDecodeError, UnicodeDecodeError):
+                    text = suite_file.read_text(encoding="utf-8")
+                except OSError:
                     continue
+                if suite_file.suffix == ".jsonl":
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(obj, dict):
+                            eval_examples.append(obj)
+                else:
+                    try:
+                        suite = json.loads(text)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(suite, list):
+                        eval_examples.extend(e for e in suite if isinstance(e, dict))
+                    elif isinstance(suite, dict) and isinstance(suite.get("examples"), list):
+                        eval_examples.extend(e for e in suite["examples"] if isinstance(e, dict))
 
         return cls(eval_examples=eval_examples, **kwargs)
 
@@ -174,8 +198,10 @@ class PipelineValidator:
         """Validate a candidate. Returns (ok, reasons)."""
         reasons: list[str] = []
 
-        # 1. Secret scan
+        # 1. Secret scan every persisted surface, including optional tool schema.
         text = self._extract_text(candidate)
+        if candidate.get("tools") is not None:
+            text += " " + json.dumps(candidate.get("tools"), ensure_ascii=False)
         secrets = scan_secrets(text)
         if secrets:
             reasons.append(f"secret_detected: {[s[0] for s in secrets]}")

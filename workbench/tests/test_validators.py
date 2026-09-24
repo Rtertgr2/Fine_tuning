@@ -106,7 +106,9 @@ def test_c5_fail_aws_key():
             msg("assistant", '{"status":"APPROVED","aws":"AKIAIOSFODNN7EXAMPLE"}'),
         ],
     )
-    assert "C5" in codes(validate_example(bad, make_ctx()))
+    report = validate_example(bad, make_ctx())
+    assert "C5" in codes(report)
+    assert "AKIAIOSFODNN7EXAMPLE" not in " ".join(issue.message for issue in report.violations)
 
 
 def test_c6_exact_duplicate(plan_example):

@@ -28,13 +28,22 @@ def client(tmp_workbench):
 
 
 def _model_payload(version: str = "v0.1.0", **overrides) -> dict:
+    import hashlib
+
+    artifact_dir = config.MODELS_DIR / version
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = artifact_dir / "model-Q5_K_M.gguf"
+    if not artifact_path.exists():
+        artifact_path.write_bytes(b"GGUF" + version.encode("ascii") + b"-test-artifact")
+    digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
     base = {
         "version": version,
         "dataset_version": "v0001",
-        "train_run": "run_001",
+        "train_run": "r001",
         "llama_cpp_commit": "abc123def",
         "quant": "Q5_K_M",
-        "gguf_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "gguf_path": str(artifact_path),
+        "gguf_sha256": digest,
         "eval_report": None,
         "status": "candidate",
     }
@@ -51,8 +60,10 @@ def _write_eval_report(tmp_path, gates: list | None = None) -> str:
             {"name": "security_catch", "threshold": ">=85%", "actual": 90.0, "pass": True},
             {"name": "security_fp", "threshold": "0-10%", "actual": 5.0, "pass": True},
             {"name": "json_validity", "threshold": ">=100%", "actual": 100.0, "pass": True},
-            {"name": "speed_8k", "threshold": ">=30%", "actual": 45.0, "pass": True},
+            {"name": "speed_8k", "threshold": ">=30 tok/s", "actual": 45.0, "pass": True},
             {"name": "regression", "threshold": ">=97%", "actual": 98.0, "pass": True},
+            {"name": "plan_json", "threshold": ">=100%", "actual": 100.0, "pass": True},
+            {"name": "end_to_end", "threshold": ">=100%", "actual": 100.0, "pass": True},
         ]
     report = {
         "run_id": "test_run",
@@ -93,6 +104,16 @@ def test_register_rejects_invalid_version_format(client):
     assert r.status_code == 422
 
 
+def test_register_cannot_bypass_candidate_gate(client):
+    r = client.post("/models/register", json=_model_payload(status="production"))
+    assert r.status_code == 422
+
+
+def test_register_rejects_tampered_artifact_hash(client):
+    r = client.post("/models/register", json=_model_payload(gguf_sha256="0" * 64))
+    assert r.status_code == 422
+
+
 def test_register_rejects_duplicate_version(client):
     client.post("/models/register", json=_model_payload())
     r = client.post("/models/register", json=_model_payload())
@@ -105,6 +126,15 @@ def test_register_default_quant(client):
     r = client.post("/models/register", json=payload)
     assert r.status_code == 201
     assert r.json()["quant"] == "Q5_K_M"
+
+
+def test_attach_eval_report_after_registration(client, tmp_workbench):
+    client.post("/models/register", json=_model_payload())
+    report_path = _write_eval_report(tmp_workbench)
+    response = client.post("/models/v0.1.0/eval-report", json={"eval_report": report_path})
+    assert response.status_code == 200
+    assert response.json()["eval_report"] == response.json()["manifest"]["eval_report"]
+    assert response.json()["manifest"]["eval_report_run_id"] == "test_run"
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +203,8 @@ def test_promote_to_production_passes_with_report(client, tmp_workbench):
     body = r.json()
     assert body["new_status"] == "production"
     assert body["gate_passed"] is True
+    assert body["actions"][0]["status"] == "ok"
+    assert body["actions"][0]["target"] == "v0.1.0"
 
     # Verify current production
     r = client.get("/models/current")
@@ -261,6 +293,8 @@ def test_rollback_to_previous_version(client, tmp_workbench):
     body = r.json()
     assert body["version"] == "v0.1.0"
     assert body["previous_production"] == "v0.2.0"
+    assert body["actions"][0]["status"] == "ok"
+    assert body["actions"][0]["target"] == "v0.1.0"
 
     # v0.1.0 is now production
     r = client.get("/models/current")
@@ -294,26 +328,20 @@ def test_rollback_not_found(client):
 
 
 def test_service_register_and_get(conn):
-    record = svc.register_model(
-        conn,
-        version="v0.1.0",
-        dataset_version="v0001",
-        train_run="run_001",
-        llama_cpp_commit="abc123",
-        quant="Q5_K_M",
-        gguf_sha256="deadbeef",
-    )
+    payload = _model_payload("v0.1.0")
+    record = svc.register_model(conn, **payload)
     assert record["version"] == "v0.1.0"
     assert record["status"] == "candidate"
+    assert record["manifest"]["gguf_path"].endswith("model-Q5_K_M.gguf")
 
     fetched = svc.get_model(conn, "v0.1.0")
     assert fetched is not None
-    assert fetched["gguf_sha256"] == "deadbeef"
+    assert fetched["gguf_sha256"] == payload["gguf_sha256"]
 
 
 def test_service_list_models_filter(conn):
-    svc.register_model(conn, version="v0.1.0")
-    svc.register_model(conn, version="v0.2.0")
+    svc.register_model(conn, **_model_payload("v0.1.0"))
+    svc.register_model(conn, **_model_payload("v0.2.0"))
 
     all_models = svc.list_models(conn)
     assert len(all_models) == 2
@@ -326,14 +354,14 @@ def test_service_list_models_filter(conn):
 
 
 def test_service_promote_gate_check_blocks(conn):
-    svc.register_model(conn, version="v0.1.0", eval_report=None)
+    svc.register_model(conn, **_model_payload("v0.1.0", eval_report=None))
     with pytest.raises(svc.GateCheckError):
         svc.promote_model(conn, "v0.1.0", target_status="production")
 
 
 def test_service_rollback(conn):
-    svc.register_model(conn, version="v0.1.0")
-    svc.register_model(conn, version="v0.2.0")
+    svc.register_model(conn, **_model_payload("v0.1.0"))
+    svc.register_model(conn, **_model_payload("v0.2.0"))
 
     # Manually set v0.1.0 to production for this test
     conn.execute("UPDATE model_versions SET status='production' WHERE version='v0.1.0'")

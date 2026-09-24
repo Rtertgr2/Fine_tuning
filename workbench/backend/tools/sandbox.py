@@ -178,11 +178,15 @@ class Sandbox:
     # -- policy -------------------------------------------------------------
 
     def _resolve(self, rel_path: str) -> Path:
-        """Resolve a workspace-relative path, raising PolicyError on traversal."""
+        """Resolve a workspace path and block both `..` and symlink escapes."""
         err = _policy_check_path(rel_path)
         if err:
             raise PolicyError(err)
-        return (self.workspace / rel_path).resolve()
+        root = self.root()
+        resolved = (root / rel_path).resolve()
+        if not resolved.is_relative_to(root):
+            raise PolicyError(f"path escapes sandbox workspace: {rel_path!r}")
+        return resolved
 
     # -- tool implementations -----------------------------------------------
 

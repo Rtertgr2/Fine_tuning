@@ -85,14 +85,29 @@ class BaseGenerator(abc.ABC):
         conn = connect(self._db_path)
         try:
             existing = self._load_existing(conn)
+            from backend.app import config
+            from backend.pipeline.validator import ContaminationChecker, PipelineValidator
+
+            contamination = ContaminationChecker.from_eval_dir(
+                threshold=config.EVAL_OVERLAP_THRESHOLD
+            )
+            pipeline_validator = PipelineValidator(
+                contamination_checker=contamination,
+                existing_hashes={example.content_hash for example in existing if example.content_hash},
+                near_dup_threshold=config.NEAR_DUP_THRESHOLD,
+            )
+
             for cand in candidates:
-                if self._is_duplicate(cand, existing):
+                duplicate = self._is_duplicate(cand, existing)
+                pipeline_ok, pipeline_reasons = pipeline_validator.validate(cand)
+                if duplicate or not pipeline_ok:
+                    reasons = (["exact_duplicate"] if duplicate else []) + pipeline_reasons
                     result.rejected.append(
-                        {**cand, "reason": "duplicate", "meta": cand.get("meta", {})}
+                        {**cand, "reason": "; ".join(sorted(set(reasons))), "meta": cand.get("meta", {})}
                     )
                     continue
 
-                report = self._validate(cand)
+                report = self._validate(cand, peers=existing)
                 if not report.ok:
                     result.rejected.append(
                         {
@@ -105,6 +120,15 @@ class BaseGenerator(abc.ABC):
                     continue
 
                 self._enqueue(conn, cand)
+                # Make accepted candidates visible to later candidates in the
+                # same batch so exact and near duplicates are filtered too.
+                h = content_hash(cand["messages"], cand.get("tools"))
+                existing.append(FwExample(
+                    id=f"batch:{len(existing)}", category=cand["category"],
+                    messages=cand["messages"], tools=cand.get("tools"),
+                    source=self.source, group_id=cand.get("group_id"),
+                    status="draft", content_hash=h,
+                ))
         finally:
             conn.close()
 
@@ -125,10 +149,14 @@ class BaseGenerator(abc.ABC):
                 return True
         return False
 
-    def _validate(self, cand: dict[str, Any]) -> Report:
-        """Run Phase 1 validators on a candidate."""
+    def _validate(
+        self,
+        cand: dict[str, Any],
+        peers: Sequence[FwExample] | None = None,
+    ) -> Report:
+        """Run the shared Phase 1 validators against stored and batch peers."""
         fw = FwExample(
-            id="candidate",
+            id=f"candidate:{content_hash(cand['messages'], cand.get('tools'))[:12]}",
             category=cand["category"],
             messages=cand["messages"],
             tools=cand.get("tools"),
@@ -137,11 +165,12 @@ class BaseGenerator(abc.ABC):
             status="draft",
             content_hash=content_hash(cand["messages"], cand.get("tools")),
         )
-        conn = connect(self._db_path)
-        try:
-            peers = self._load_existing(conn)
-        finally:
-            conn.close()
+        if peers is None:
+            conn = connect(self._db_path)
+            try:
+                peers = self._load_existing(conn)
+            finally:
+                conn.close()
         ctx = make_context(peers=peers)
         return validate_example(fw, ctx)
 

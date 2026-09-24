@@ -167,9 +167,10 @@ class TestTrainingService:
         assert record is not None
         assert record["status"] == "stopped"
 
-    def test_resume_run(self, conn, tmp_workbench):
+    def test_resume_run(self, conn, tmp_workbench, monkeypatch):
         training_svc.create_run(conn, config_json={"run_name": "test"})
         training_svc.stop_run(conn, "r001")
+        monkeypatch.setattr(training_svc, "spawn_training_process", lambda *args: None)
         record = training_svc.resume_run(conn, "r001")
         assert record is not None
         assert record["status"] == "pending"
@@ -251,8 +252,16 @@ class TestScriptGeneration:
         assert output.exists()
         content = output.read_text()
         assert "test_run" in content
-        assert "SFTTrainer" in content
+        assert "Trainer(" in content
         assert "LoraConfig" in content
+        assert "assistant_only" in content
+        assert "response_template =" not in content
+        assert "prepare_model_for_kbit_training" in content
+        assert "EarlyStoppingCallback" in content
+        assert "metrics.jsonl" in content
+        assert "run_manifest.json" in content
+        import py_compile
+        py_compile.compile(str(output), doraise=True)
 
     def test_generate_colab(self, tmp_path):
         from scripts.generate_training_script import generate_script
@@ -264,7 +273,11 @@ class TestScriptGeneration:
         assert output.exists()
         content = output.read_text()
         assert "#@title" in content
-        assert "!pip install" in content
+        assert "'pip', 'install'" in content
+        assert "subprocess.check_call" in content
+        assert "build_example" in content
+        import py_compile
+        py_compile.compile(str(output), doraise=True)
 
 
 # ---------------------------------------------------------------------------

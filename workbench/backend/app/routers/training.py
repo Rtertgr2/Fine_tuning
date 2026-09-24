@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 import asyncio
 
 from backend.app import config, schemas
@@ -39,20 +39,54 @@ def list_base_models():
 
 
 @router.post(
+    "/training/preflight",
+    response_model=dict[str, Any],
+)
+def run_preflight_only(payload: schemas.TrainingRunIn, conn: sqlite3.Connection = Depends(get_db)):
+    """Run pre-flight checks PF1-PF6 against a config WITHOUT creating a run
+    (the UI's 'ตรวจสอบ' button — plan 03 §6, plan 07 §8)."""
+    cfg = TrainingConfig.from_dict(payload.config if payload.config else {})
+    errors = cfg.validate()
+    if errors:
+        raise HTTPException(422, detail={"message": "config validation failed", "errors": errors})
+
+    from backend.app.services.preflight import run_preflight
+
+    return run_preflight(cfg).to_dict()
+
+
+@router.post(
     "/training/runs",
     status_code=201,
     response_model=dict[str, Any],
 )
 async def start_training_run(
     payload: schemas.TrainingRunIn,
-    background_tasks: BackgroundTasks,
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Start a new training run (generates script + starts background process)."""
+    """Create a training run and start it in the background.
+
+    Pre-flight is mandatory before starting (plan 03 §6): if any critical
+    check fails (PF1/PF3/...), the run is NOT created and the report is
+    returned with 409, so the UI can show why training is locked.
+    """
     cfg = TrainingConfig.from_dict(payload.config if payload.config else {})
     errors = cfg.validate()
     if errors:
         raise HTTPException(422, detail={"message": "config validation failed", "errors": errors})
+
+    from backend.app.services.preflight import run_preflight
+
+    report = await asyncio.to_thread(run_preflight, cfg)
+    if not report.can_proceed:
+        raise HTTPException(
+            409,
+            detail={
+                "message": "pre-flight failed — training is locked until the "
+                           "critical checks pass (plan 03 §6)",
+                "preflight": report.to_dict(),
+            },
+        )
 
     try:
         record = svc.create_run_sync(
@@ -63,17 +97,11 @@ async def start_training_run(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
-    run_id = record["run_id"]
-    runs_dir = config.DATA_DIR / "training" / "runs" / run_id
+    # Store the passing pre-flight report on the run record
+    svc.update_run(conn, record["run_id"], preflight=json.dumps(report.to_dict()))
 
-    # Generate training script (always do this — belt and suspenders)
-    cfg = TrainingConfig.from_dict(payload.config if payload.config else {})
-    from backend.app.services.training import _generate_training_script
-    _generate_training_script(runs_dir, cfg.to_dict())
-
-    # Start training as background asyncio task
-    loop = asyncio.get_running_loop()
-    loop.create_task(svc._run_training_process(run_id, runs_dir))
+    # Start training in the background (asyncio task with a strong reference)
+    svc.spawn_training_process(record["run_id"], config.DATA_DIR / "training" / "runs" / record["run_id"])
 
     return record
 

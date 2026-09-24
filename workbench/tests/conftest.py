@@ -13,6 +13,8 @@ def tmp_workbench(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "examples.db")
     monkeypatch.setattr(config, "DATASETS_DIR", tmp_path / "datasets")
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path / "models")
+    monkeypatch.setattr(config, "LLAMA_SERVER_CMD", "")
     from backend.app.db import init_db
 
     init_db(tmp_path / "examples.db")
