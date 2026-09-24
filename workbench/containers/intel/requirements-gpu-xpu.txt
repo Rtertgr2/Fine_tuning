@@ -12,3 +12,4 @@ accelerate>=1.11,<2
 datasets>=4.4,<5
 peft>=0.17,<1
 bitsandbytes==0.50.2
+docker>=7.0,<8

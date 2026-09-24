@@ -13,6 +13,9 @@ services:
     group_add:
       - "${GPU_RENDER_GID:-989}"
       - "${GPU_VIDEO_GID:-986}"
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
     devices:
       - /dev/dri/renderD128:/dev/dri/renderD128
     volumes:
@@ -24,6 +27,7 @@ services:
       - ./scripts:/app/scripts:ro
       - ./runner:/app/runner:ro
       - ./eval:/app/eval
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "127.0.0.1:8300:8300"
     environment:

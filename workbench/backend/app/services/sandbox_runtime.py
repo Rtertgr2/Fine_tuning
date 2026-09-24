@@ -16,7 +16,6 @@ Design:
 from __future__ import annotations
 
 import docker
-import os
 import secrets
 import subprocess
 import tempfile
@@ -161,14 +160,15 @@ class Sandbox:
         self._container_started = True
 
     def _create_container(self) -> docker.models.containers.Container:
-        """Create a Docker container with full isolation settings."""
+        """Create and start a Docker container with full isolation settings."""
         workspace_path = str(self.workspace.resolve())
+        container_name = f"ft_sandbox_{self._uid}_{int(time.time())}"
 
-        # Build the docker run command for container creation
+        # Build docker create command via CLI (DIND-compatible)
         cmd = [
             "docker", "create",
             # Security: non-root user
-            f"-u", f"{self._uid}:{self._gid}",
+            "-u", f"{self._uid}:{self._gid}",
             # Network isolation: no network
             "--network", "none",
             # Resource limits
@@ -190,27 +190,28 @@ class Sandbox:
             # Temp directory inside container
             "--tmpfs", "/tmp:size=64M",
             # Container name
-            "--name", f"ft_sandbox_{self._uid}_{int(time.time())}",
+            "--name", container_name,
             # Image
             DOCKER_IMAGE,
             # Command (sleep to keep container alive for docker exec)
             "sleep", "infinity",
         ]
 
-        # Run docker create
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=30,
-        )
+        # Create container via Docker CLI
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
-            raise RuntimeError(
-                f"Failed to create Docker container: {result.stderr.strip()}"
-            )
+            raise RuntimeError(f"Failed to create Docker container: {result.stderr.strip()}")
 
-        container_id = result.stdout.strip()
+        # Start container via Docker CLI
+        start_result = subprocess.run(
+            ["docker", "start", container_name],
+            capture_output=True, text=True, timeout=10,
+        )
+        if start_result.returncode != 0:
+            raise RuntimeError(f"Failed to start Docker container: {start_result.stderr.strip()}")
 
-        # Get the container object via the Docker SDK
-        container = self._client.containers.get(container_id)
+        # Get the container object via the Docker SDK for exec operations
+        container = self._client.containers.get(container_name)
         return container
 
     def _ensure_tool_script(self) -> str:
@@ -303,15 +304,15 @@ class Sandbox:
 
     # -- container execution -----------------------------------------------
 
-    def _exec(self, cmd: list[str]) -> str:
+    def _exec(self, cmd: list[str], workdir: str | None = None) -> str:
         """Execute a command inside the Docker container via docker exec.
 
         Returns the stdout output as a string.
         """
         exec_id = self._container.exec_run(
             cmd,
-            workdir=str(self.workspace),
             user=f"{self._uid}:{self._gid}",
+            workdir=workdir or str(self.workspace),
         )
         if isinstance(exec_id, tuple):
             # docker.models.Container.exec_run returns (result, output) in newer versions
@@ -360,13 +361,18 @@ class Sandbox:
         if not path:
             raise PolicyError("'path' is required")
         resolved = self._resolve(path)
-        if not resolved.exists():
-            return f"Error: no such file or directory: {path}\n"
-        size = resolved.stat().st_size
-        if size > MAX_FILE_BYTES:
-            raise PolicyError(f"file exceeds size limit ({size} bytes)")
+        # Check file size via exec (exists check is on host Path, not container)
+        size_check = self._exec(
+            ["python3", "-c", f"import os; print(os.path.getsize('{resolved.name}'))"],
+            workdir=str(self.workspace),
+        )
         try:
-            # Read inside the container
+            file_size = int(size_check.strip())
+        except ValueError:
+            return f"Error: no such file or directory: {path}\n"
+        if file_size > MAX_FILE_BYTES:
+            raise PolicyError(f"file exceeds size limit ({file_size} bytes)")
+        try:
             content = self._exec(
                 ["python3", "-c", f"print(open('{resolved.name}').read())"],
                 workdir=str(self.workspace),
