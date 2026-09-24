@@ -45,6 +45,16 @@ def _tool_payload(i: int, group: str | None = None) -> dict:
     }
 
 
+def test_training_preflight_is_read_only_and_fail_closed(client):
+    response = client.post("/training/preflight", json={"config": {"dataset_version": "v9999"}})
+    assert response.status_code == 200
+    report = response.json()
+    assert not report["can_proceed"]
+    assert any(item["code"] == "PF1" and not item["passed"] for item in report["results"])
+    runs = client.get("/training/runs").json()
+    assert runs["total"] == 0
+
+
 def test_tools_autofilled_for_tool_category(client):
     """tool/loop examples must carry the registry's tool definitions."""
     r = client.post("/examples", json=_tool_payload(30))

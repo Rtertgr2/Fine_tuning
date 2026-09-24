@@ -1,6 +1,13 @@
-# Training outputs (runtime generated)
+# Training and model outputs (runtime generated; keep artifacts out of Git)
 data/training/runs/r*/
 data/training/runs/test_gen/
+models/current
+models/v*/
+models/deploy/
+models/adapters/
+models/runs/
+eval/reports/
+fine_tuning_workbench.egg-info/
 
 # Test artifacts
 test_train_gen.py

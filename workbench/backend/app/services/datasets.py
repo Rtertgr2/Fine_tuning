@@ -18,6 +18,7 @@ import sqlite3
 from collections import defaultdict
 from typing import Any, Sequence
 
+from backend.adapters.base import jaccard, shingles as ex_shingles
 from backend.adapters.registry import get_adapter
 from backend.app import config
 from backend.app.services import examples as ex_service
@@ -74,6 +75,59 @@ def split_examples(
     train.sort(key=lambda e: e.id)
     val.sort(key=lambda e: e.id)
     return train, val
+
+
+def _check_eval_overlap(
+    valid: list[FwExample],
+) -> tuple[dict[str, Any], list[FwExample]]:
+    """Compare every example with the frozen eval suites via n-gram overlap.
+
+    Returns (manifest_section, kept_examples). Examples at/above the
+    configured Jaccard threshold are dropped (plan 04 §4: overlap check on
+    every dataset build; plan 02 T2.8: overlapping examples are discarded).
+    """
+    section: dict[str, Any] = {
+        "threshold": config.EVAL_OVERLAP_THRESHOLD,
+        "checked_cases": 0,
+        "checked_examples": len(valid),
+        "dropped": [],
+        "dropped_count": 0,
+    }
+    try:
+        from backend.pipeline.validator import ContaminationChecker
+
+        checker = ContaminationChecker.from_eval_dir(
+            threshold=config.EVAL_OVERLAP_THRESHOLD
+        )
+    except Exception:
+        section["status"] = "skipped (eval suites unavailable)"
+        return section, valid
+
+    section["checked_cases"] = len(checker._eval_shingles)
+    if not checker._eval_shingles:
+        section["status"] = "no eval suites found"
+        return section, valid
+
+    kept: list[FwExample] = []
+    for ex in valid:
+        text = "\n".join(str(m.get("content") or "") for m in ex.messages)
+        sh = ex_shingles(text)
+        max_score = 0.0
+        if sh:
+            for eval_sh in checker._eval_shingles.values():
+                score = jaccard(sh, eval_sh)
+                if score > max_score:
+                    max_score = score
+        if max_score >= config.EVAL_OVERLAP_THRESHOLD:
+            section["dropped"].append(
+                {"id": ex.id, "max_overlap": round(max_score, 3)}
+            )
+        else:
+            kept.append(ex)
+
+    section["dropped_count"] = len(section["dropped"])
+    section["status"] = "ok"
+    return section, kept
 
 
 def _counts(examples: Sequence[FwExample]) -> dict[str, int]:
@@ -146,6 +200,14 @@ def build_dataset(
     if not valid:
         raise ValueError("every approved example failed err-level validation")
 
+    # Overlap check against the frozen eval suites (plan 00 ข้อ 3 / plan 04 §4):
+    # every dataset build must verify no training example is too close to a
+    # test case. Examples above the threshold are dropped and recorded.
+    contamination, valid = _check_eval_overlap(valid)
+
+    if not valid:
+        raise ValueError("every approved example overlaps the frozen eval suites")
+
     train, val = split_examples(valid, ratio, use_seed)
 
     ds_id = next_version_id(conn)
@@ -196,6 +258,7 @@ def build_dataset(
             "excluded_invalid": invalid,
             "excluded_invalid_count": len(invalid),
         },
+        "contamination": contamination,
         "validation": {
             "err_counts_by_code": dict(sorted(err_codes.items())),
             "warn_counts_by_code": dict(sorted(warn_codes.items())),

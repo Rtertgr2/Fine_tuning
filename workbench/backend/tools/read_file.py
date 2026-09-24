@@ -30,7 +30,10 @@ def read_file(workspace: Path, args: dict[str, Any]) -> str:
     if err:
         raise PolicyError(err)
 
-    resolved = (workspace / path).resolve()
+    root = workspace.resolve()
+    resolved = (root / path).resolve()
+    if not resolved.is_relative_to(root):
+        raise PolicyError(f"path escapes sandbox workspace: {path!r}")
     if not resolved.exists():
         return f"Error: no such file or directory: {path}\n"
     if not resolved.is_file():

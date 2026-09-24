@@ -33,7 +33,10 @@ def write_file(workspace: Path, args: dict[str, Any]) -> str:
     if err:
         raise PolicyError(err)
 
-    resolved = (workspace / path).resolve()
+    root = workspace.resolve()
+    resolved = (root / path).resolve()
+    if not resolved.is_relative_to(root):
+        raise PolicyError(f"path escapes sandbox workspace: {path!r}")
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content, encoding="utf-8")
     return f"wrote {path} ({len(content)} bytes)\n"

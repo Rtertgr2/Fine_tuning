@@ -8,6 +8,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,10 +19,17 @@ RUN_ID_RE = re.compile(r"^r(\d+)$")
 
 # Track active training processes: run_id -> Popen
 _active_processes: dict[str, subprocess.Popen] = {}
+# Strong references to background tasks so they are not garbage-collected
+# mid-flight (documented asyncio.create_task caveat).
+_bg_tasks: set[asyncio.Task] = set()
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _db_path() -> Path:
+    return config.DB_PATH
 
 
 def _next_run_id(conn: sqlite3.Connection) -> str:
@@ -68,67 +76,118 @@ def _generate_training_script(run_dir: Path, config_json: dict[str, Any]) -> Pat
 
 
 async def _run_training_process(run_id: str, run_dir: Path) -> None:
-    """Async background task: run training subprocess, update DB when done."""
-    import sqlite3 as sq
+    """Run one subprocess and update its lifecycle without overwriting stop."""
+    from backend.app.db import connect
+
     log_path = run_dir / "training.log"
-    
+
+    def _mark_running() -> bool:
+        conn = connect()
+        try:
+            cur = conn.execute(
+                "UPDATE training_runs SET status = 'running' WHERE run_id = ? AND status = 'pending'",
+                (run_id,),
+            )
+            conn.commit()
+            return cur.rowcount == 1
+        finally:
+            conn.close()
+
+    def _finish(status: str) -> None:
+        conn = connect()
+        try:
+            adapter_path = run_dir / "adapter"
+            report_path = run_dir / "report.md"
+            conn.execute(
+                """UPDATE training_runs
+                   SET status = ?, completed_at = ?,
+                       adapter_path = ?, report_path = ?
+                   WHERE run_id = ? AND status = 'running'""",
+                (
+                    status, _now_iso(),
+                    str(adapter_path) if adapter_path.exists() else None,
+                    str(report_path) if report_path.exists() else None,
+                    run_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    proc: subprocess.Popen | None = None
     try:
-        # Update status to running
-        conn = sq.connect(str(config.DATA_DIR / "examples.db"))
-        conn.execute("UPDATE training_runs SET status = ? WHERE run_id = ?", ("running", run_id))
-        conn.commit()
-        conn.close()
-        
-        # Find training script
+        # If a stop request won the race before this task started, do nothing.
+        if not _mark_running():
+            return
         script_path = run_dir / "train.py"
         if not script_path.exists():
             raise FileNotFoundError(f"train.py not found at {script_path}")
-        
-        # Run training asynchronously — output to log file
-        log_fh = open(log_path, "w", encoding="utf-8")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, str(script_path),
-            cwd=str(run_dir),
-            stdout=log_fh,
-            stderr=asyncio.subprocess.STDOUT,
-        )
+
+        with open(log_path, "w", encoding="utf-8") as log_fh:
+            proc = subprocess.Popen(
+                [sys.executable, str(script_path)],
+                cwd=str(run_dir),
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+            )
         _active_processes[run_id] = proc
-        
-        # Wait for completion (non-blocking for event loop)
-        returncode = await proc.wait()
-        log_fh.close()
-        
-        # Update DB with result
-        conn = sq.connect(str(config.DATA_DIR / "examples.db"))
-        if returncode == 0:
-            conn.execute(
-                "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
-                ("completed", _now_iso(), run_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
-                ("failed", _now_iso(), run_id),
-            )
-        conn.commit()
-        conn.close()
-        
-    except Exception as e:
-        # Write error to log
-        log_path.write_text(f"Training process error: {e}", encoding="utf-8")
-        # Update status to failed
+
+        # Stop may have been requested after status became running but before
+        # Popen completed. Re-read status before allowing the child to continue.
+        conn = connect()
         try:
-            conn = sq.connect(str(config.DATA_DIR / "examples.db"))
-            conn.execute(
-                "UPDATE training_runs SET status = ?, completed_at = ? WHERE run_id = ?",
-                ("failed", _now_iso(), run_id),
-            )
-            conn.commit()
+            row = conn.execute("SELECT status FROM training_runs WHERE run_id = ?", (run_id,)).fetchone()
+            still_running = row is not None and row["status"] == "running"
+        finally:
             conn.close()
-        except:
+        if not still_running and proc.poll() is None:
+            proc.terminate()
+
+        returncode = await asyncio.to_thread(proc.wait)
+        _finish("completed" if returncode == 0 else "failed")
+    except Exception as exc:  # record failures without changing a user-stopped run
+        try:
+            log_path.write_text(f"Training process error: {exc}\n", encoding="utf-8")
+        except OSError:
+            pass
+        try:
+            _finish("failed")
+        except Exception:
             pass
     finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                await asyncio.to_thread(proc.wait, 10)
+            except Exception:
+                proc.kill()
         _active_processes.pop(run_id, None)
+
+
+def spawn_training_process(run_id: str, run_dir: Path) -> None:
+    """Start ``_run_training_process`` in the background from any context.
+
+    - Inside a running event loop (FastAPI endpoint): schedules an asyncio
+      task, keeping a strong reference so it survives GC.
+    - Otherwise (tests, scripts): runs it on a daemon thread with its own
+      loop — never a bare coroutine (which would be silently discarded).
+    """
+    coro = _run_training_process(run_id, run_dir)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        def _runner() -> None:
+            try:
+                asyncio.run(coro)
+            except Exception:
+                pass
+
+        threading.Thread(target=_runner, name=f"train-{run_id}", daemon=True).start()
+        return
+
+    task = loop.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
 
 
 def create_run_sync(
@@ -177,33 +236,12 @@ def create_run(
     config_json: dict[str, Any],
     dataset_version: str = "",
 ) -> dict[str, Any]:
-    """Create a new training run record and set up its output directory.
-    
-    Immediately generates training script and starts training in background thread.
+    """Create a new training run record (status=pending) and generate its
+    training script. Does NOT start training — callers that want a live
+    process (router, CLI) call :func:`spawn_training_process` explicitly,
+    after their own gating (pre-flight, plan 03 §6).
     """
-    record = create_run_sync(conn, config_json, dataset_version)
-
-    # Start training in background (async task)
-    run_id = record["run_id"]
-    runs_dir = _runs_dir() / run_id
-    import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_run_training_process(run_id, runs_dir))
-    except RuntimeError:
-        # No running loop — use threading
-        import threading
-        t = threading.Thread(target=_run_training_process, args=(run_id, runs_dir), daemon=False)
-        t.start()
-
-    return record
-
-
-def start_run(run_id: str) -> None:
-    """Start training in background."""
-    from fastapi import BackgroundTasks
-    # This will be called from the router with BackgroundTasks
-    pass
+    return create_run_sync(conn, config_json, dataset_version)
 
 
 def get_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
@@ -275,26 +313,38 @@ def update_run(
 
 
 def stop_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
-    """Stop a training run: kill process + update status."""
+    """Stop a pending/running job and preserve the stopped state on completion."""
+    record = get_run(conn, run_id)
+    if record is None:
+        return None
+    if record["status"] not in ("pending", "running"):
+        raise ValueError(f"cannot stop run with status {record['status']!r}")
+
     proc = _active_processes.get(run_id)
-    if proc and proc.poll() is None:
+    if proc is not None and proc.poll() is None:
         proc.terminate()
         try:
             proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=10)
     _active_processes.pop(run_id, None)
-    return update_run(conn, run_id, status="stopped")
+    # Persist stop after the process exits; the async waiter only updates rows
+    # still marked running, so it cannot overwrite this terminal state.
+    return update_run(conn, run_id, status="stopped", completed_at=_now_iso())
 
 
 def resume_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
-    """Resume a stopped training run (status set to pending)."""
+    """Resume a stopped/failed run: restart the training script in the
+    background (the generated script picks up the latest checkpoint)."""
     record = get_run(conn, run_id)
     if record is None:
         return None
     if record["status"] not in ("stopped", "failed"):
         raise ValueError(f"cannot resume run with status {record['status']!r}")
-    return update_run(conn, run_id, status="pending")
+    update_run(conn, run_id, status="pending")
+    spawn_training_process(run_id, _runs_dir() / run_id)
+    return get_run(conn, run_id)
 
 
 def delete_run(conn: sqlite3.Connection, run_id: str) -> bool:

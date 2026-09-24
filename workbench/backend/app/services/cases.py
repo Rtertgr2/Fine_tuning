@@ -134,24 +134,62 @@ def approve_case(
     final_example: dict[str, Any] | None = None,
     second_reviewer: str | None = None,
 ) -> dict[str, Any] | None:
-    """Approve a case. Sec cases require second reviewer."""
+    """Approve a corrected example only after redaction and shared validation."""
     row = conn.execute("SELECT * FROM case_queue WHERE case_id = ?", (case_id,)).fetchone()
     if row is None:
         return None
+    if row["status"] not in (CASE_STATUS_PENDING, CASE_STATUS_EDITING):
+        raise ValueError(f"cannot approve a case with status {row['status']!r}")
+    if row["case_type"] == "sec":
+        if not second_reviewer:
+            raise ValueError("sec cases require second_reviewer approval")
+        if row["reviewer"] and second_reviewer.strip() == row["reviewer"].strip():
+            raise ValueError("sec approval requires a different second reviewer")
+    if final_example is None:
+        raise ValueError("an edited final_example is required before approval")
 
-    # sec cases need second reviewer
-    if row["case_type"] == "sec" and not second_reviewer:
-        raise ValueError("sec cases require second_reviewer approval")
+    from backend.app import schemas
+    from backend.app.services import examples as example_svc
+    from backend.app.services.redaction import redact_dict
+    from backend.tools.registry import tool_schemas
 
+    # Redact at write time so reviewer edits cannot re-introduce secrets.
+    cleaned, _redaction = redact_dict(final_example)
+    if not isinstance(cleaned, dict):
+        raise ValueError("final_example must be a JSON object")
+    cleaned["source"] = "active_learning"
+    cleaned["group_id"] = cleaned.get("group_id") or row["project"] or f"al/session/{row['session_id']}"
+    category = cleaned.get("category")
+    if category in ("tool", "loop") and not cleaned.get("tools"):
+        cleaned["tools"] = tool_schemas()
+
+    try:
+        payload = schemas.ExampleIn.model_validate(cleaned)
+    except Exception as exc:
+        raise ValueError(f"invalid final_example schema: {exc}") from exc
+
+    validation = example_svc.validate_draft(conn, payload)
+    if not validation.ok:
+        failures = [f"{issue.code}: {issue.message}" for issue in validation.errors]
+        raise ValueError("final_example failed shared validators: " + "; ".join(failures))
+
+    normalized_example = {
+        "category": payload.category,
+        "messages": [message.model_dump() for message in payload.messages],
+        "tools": payload.tools,
+        "source": "active_learning",
+        "group_id": payload.group_id,
+    }
+    ts = _now()
     conn.execute(
         """UPDATE case_queue
            SET status = ?, edited_example_json = ?, second_reviewer = ?, updated_at = ?
            WHERE case_id = ?""",
         (
             CASE_STATUS_APPROVED,
-            json.dumps(final_example, ensure_ascii=False) if final_example else None,
+            json.dumps(normalized_example, ensure_ascii=False),
             second_reviewer,
-            _now(),
+            ts,
             case_id,
         ),
     )

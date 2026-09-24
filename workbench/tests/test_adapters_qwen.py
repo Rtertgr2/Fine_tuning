@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import pytest
+
 from backend.adapters.registry import get_adapter
 
 QWEN = get_adapter("qwen2.5-7b-instruct")
 HERMES = get_adapter("hermes2pro-llama3-8b")
+
+
+def test_model_family_resolution_is_explicit():
+    from backend.adapters.registry import adapter_for_model_id
+
+    assert adapter_for_model_id("NousResearch/Hermes-2-Pro-Llama-3-8B").name == "hermes2pro-llama3-8b"
+    assert adapter_for_model_id("Qwen/Qwen2.5-Coder-7B-Instruct").name == "qwen2.5-7b-instruct"
+    with pytest.raises(KeyError):
+        adapter_for_model_id("NousResearch/Hermes-2-Pro-Mistral-7B")
 
 
 def test_registry_lists_both():

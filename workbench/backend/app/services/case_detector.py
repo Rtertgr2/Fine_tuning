@@ -110,26 +110,32 @@ def detect_cases_for_session(
                 ))
                 break
 
-    # Check for no change after tool error
-    for i, e in enumerate(events):
-        if e["event"] == "tool_result" and _is_error_result(e["data"]):
-            # Look at next assistant message — did it change strategy?
-            remaining = events[i + 1:]
-            next_assistant = next(
-                (r for r in remaining if r["event"] == "message" and r["data"].get("role") == "assistant"),
-                None,
-            )
-            if next_assistant and _same_as_before(e["data"], next_assistant["data"]):
-                cases.append(DetectedCase(
-                    session_id=session_id,
-                    model_version=model_version,
-                    case_type=CASE_LOOP,
-                    priority=PRIORITY_MAP[CASE_LOOP],
-                    signal="No strategy change after tool error",
-                    events=events,
-                    project=project,
-                ))
-                break
+    # Check whether the assistant repeats the failed tool call after an error.
+    # Compare structured (name, arguments), not the tool_result body against an
+    # arbitrary assistant message — that comparison never detected real loops.
+    for i, event in enumerate(events):
+        if event["event"] != "tool_result" or not _is_error_result(event["data"]):
+            continue
+        previous_call = next(
+            (e["data"] for e in reversed(events[:i]) if e["event"] == "tool_call"),
+            None,
+        )
+        next_assistant = next(
+            (e for e in events[i + 1:] if e["event"] == "message" and e["data"].get("role") == "assistant"),
+            None,
+        )
+        next_call = _assistant_tool_call(next_assistant["data"]) if next_assistant else None
+        if previous_call and next_call and _same_tool_call(previous_call, next_call):
+            cases.append(DetectedCase(
+                session_id=session_id,
+                model_version=model_version,
+                case_type=CASE_LOOP,
+                priority=PRIORITY_MAP[CASE_LOOP],
+                signal=f"No strategy change after tool error: {_tool_call_desc(previous_call)}",
+                events=events,
+                project=project,
+            ))
+            break
 
     # Check for reviewer false negative (PASS but test failed)
     verdicts = [e for e in events if e["event"] == "verdict"]
@@ -212,21 +218,49 @@ def _tool_call_desc(data: dict) -> str:
 
 
 def _valid_tool_json(data: dict) -> bool:
-    """Check if tool_call data has valid structure."""
+    """Check a logged tool call has a non-empty name and JSON-object args."""
     if not isinstance(data, dict):
         return False
-    if "name" not in data:
+    function = data.get("function") if isinstance(data.get("function"), dict) else data
+    name = function.get("name")
+    args = function.get("arguments")
+    if not isinstance(name, str) or not name.strip():
         return False
-    # Check if arguments is valid (should be dict)
-    args = data.get("arguments")
-    if args is not None and not isinstance(args, dict):
-        # Might be a string that should have been parsed
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    return isinstance(args, dict)
+
+
+def _assistant_tool_call(data: dict) -> dict | None:
+    """Extract a tool call from a structured event or assistant message."""
+    if not isinstance(data, dict):
+        return None
+    if isinstance(data.get("name"), str):
+        args = data.get("arguments")
         if isinstance(args, str):
             try:
-                json.loads(args)
-            except (json.JSONDecodeError, TypeError):
-                return False
-    return True
+                args = json.loads(args)
+            except json.JSONDecodeError:
+                return None
+        return {"name": data["name"], "arguments": args} if isinstance(args, dict) else None
+    api_calls = data.get("tool_calls")
+    if isinstance(api_calls, list) and api_calls:
+        first = api_calls[0]
+        fn = first.get("function", {}) if isinstance(first, dict) else {}
+        if isinstance(fn, dict):
+            return _assistant_tool_call(fn)
+    content = data.get("content", "")
+    if isinstance(content, str) and content:
+        from backend.adapters.registry import get_adapter
+        from backend.app import config
+        parsed = get_adapter(config.ACTIVE_ADAPTER).parse_tool_calls(content)
+        if parsed.calls:
+            call = parsed.calls[0]
+            return {"name": call.name, "arguments": call.arguments}
+    return None
 
 
 def _is_error_result(data: dict) -> bool:
@@ -237,15 +271,6 @@ def _is_error_result(data: dict) -> bool:
         return True
     content = str(data.get("content", ""))
     return "error" in content.lower() or "exception" in content.lower()
-
-
-def _same_as_before(error_data: dict, next_data: dict) -> bool:
-    """Heuristic: did the assistant change strategy after an error?"""
-    # Simple heuristic: if the next message contains the same tool call
-    error_str = json.dumps(error_data)
-    next_str = json.dumps(next_data)
-    # If the next message is very similar to before the error, no change
-    return error_str[:50] in next_str or next_str[:50] in error_str
 
 
 def scan_all_sessions(

@@ -38,6 +38,7 @@ def register_model(
             train_run=payload.train_run,
             llama_cpp_commit=payload.llama_cpp_commit,
             quant=payload.quant,
+            gguf_path=payload.gguf_path,
             gguf_sha256=payload.gguf_sha256,
             eval_report=payload.eval_report,
             status=payload.status,
@@ -45,6 +46,19 @@ def register_model(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return record
+
+
+@router.post("/models/{version}/eval-report", response_model=schemas.ModelOut)
+def attach_eval_report(
+    version: str,
+    payload: schemas.ModelEvalReportIn,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Attach the full-eval report after evaluating a registered candidate."""
+    try:
+        return svc.attach_eval_report(conn, version, payload.eval_report)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post(
@@ -82,6 +96,7 @@ def promote_model(
         new_status=result["new_status"],
         previous_production=result.get("previous_production"),
         gate_passed=result["gate_passed"],
+        actions=result.get("actions", []),
         message=msg,
     )
 
@@ -106,8 +121,20 @@ def rollback_model(
     return schemas.RollbackResult(
         version=result["version"],
         previous_production=result.get("previous_production"),
+        actions=result.get("actions", []),
         message=msg,
     )
+
+
+@router.get("/models/current-symlink")
+def get_current_symlink():
+    """On-disk state of models/current (what llama-server actually loads)."""
+    from backend.app import config
+
+    return {
+        "target": svc.current_symlink_target(),
+        "dir": str(config.MODELS_DIR),
+    }
 
 
 @router.get(

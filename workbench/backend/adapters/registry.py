@@ -27,6 +27,23 @@ def get_adapter(name: str | None = None) -> ModelAdapter:
         ) from None
 
 
+def adapter_for_model_id(model_id: str | None) -> ModelAdapter:
+    """Resolve a HF model name to its locked chat-template/tokenizer adapter.
+
+    Model names from the same supported family (for example Qwen Coder and
+    Qwen Instruct) share the Qwen2.5 template. Unknown families fail closed
+    instead of silently rendering with the active default adapter.
+    """
+    name = (model_id or "").strip().lower()
+    hermes = ADAPTERS["hermes2pro-llama3-8b"]
+    qwen = ADAPTERS["qwen2.5-7b-instruct"]
+    if name in {hermes.name.lower(), hermes.hf_repo.lower()} or "hermes-2-pro-llama-3-8b" in name:
+        return hermes
+    if name in {qwen.name.lower(), qwen.hf_repo.lower()} or "qwen2.5" in name or "qwen-2.5" in name:
+        return qwen
+    raise KeyError(f"no registered chat-template adapter for base model {model_id!r}")
+
+
 def list_adapters() -> list[dict[str, str]]:
     return [
         {"name": a.name, "hf_repo": a.hf_repo, "display_name": a.display_name}

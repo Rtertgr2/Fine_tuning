@@ -38,10 +38,12 @@ if str(BASE_DIR) not in sys.path:
 
 from backend.app import config
 
-MODELS_DIR = BASE_DIR / "models"
+MODELS_DIR = config.MODELS_DIR
 ADAPTERS_DIR = MODELS_DIR / "adapters"
 RUNS_DIR = MODELS_DIR / "runs"
-DEPLOY_DIR = MODELS_DIR / "deploy"
+# Per plan 05 §5, deployed artifacts live at models/<version>/ with
+# models/current pointing to the selected production directory.
+DEPLOY_DIR = MODELS_DIR
 
 
 def sha256_file(path: Path) -> str:
@@ -58,6 +60,7 @@ def find_adapter(run_id: str) -> Path:
         ADAPTERS_DIR / run_id,
         RUNS_DIR / run_id / "adapter",
         RUNS_DIR / run_id,
+        config.DATA_DIR / "training" / "runs" / run_id / "adapter",
     ]
     for p in candidates:
         if (p / "adapter_config.json").exists():
@@ -103,43 +106,26 @@ def register_model_version(
     llama_cpp_commit: str,
     eval_report: str | None = None,
 ) -> None:
-    """Register a model version in the database."""
+    """Register one selected quantized artifact through the shared service."""
     from backend.app.db import connect
+    from backend.app.services.models import register_model
 
     conn = connect()
-    manifest = {
-        "version": version,
-        "quant": quant,
-        "gguf_sha256": sha256_file(gguf_path),
-        "gguf_path": str(gguf_path),
-        "gguf_size_mb": gguf_path.stat().st_size / (1024 * 1024),
-        "llama_cpp_commit": llama_cpp_commit,
-        "dataset_version": dataset_version,
-        "train_run": train_run,
-        "eval_report": eval_report,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    conn.execute(
-        """INSERT OR REPLACE INTO model_versions
-           (version, dataset_version, train_run, llama_cpp_commit, quant,
-            gguf_sha256, eval_report, status, manifest_json, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'candidate', ?, ?)""",
-        (
-            f"{version}_{quant}",
-            dataset_version,
-            train_run,
-            llama_cpp_commit,
-            quant,
-            sha256_file(gguf_path),
-            eval_report,
-            json.dumps(manifest),
-            datetime.now(timezone.utc).isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
-    logger.info(f"Registered model version: {version}_{quant}")
+    try:
+        record = register_model(
+            conn,
+            version=version,
+            dataset_version=dataset_version,
+            train_run=train_run,
+            llama_cpp_commit=llama_cpp_commit,
+            quant=quant,
+            gguf_path=str(gguf_path),
+            gguf_sha256=sha256_file(gguf_path),
+            eval_report=eval_report,
+        )
+    finally:
+        conn.close()
+    logger.info("Registered candidate model: %s (%s)", record["version"], quant)
 
 
 def smoke_eval(gguf_path: Path, model_name: str = "smoke_test") -> dict:
@@ -189,6 +175,8 @@ def run_pipeline(
     dataset_version: str | None = None,
     outdir: Path | None = None,
     levels: list[str] | None = None,
+    register_quant: str | None = "Q5_K_M",
+    eval_report: str | None = None,
     skip_merge: bool = False,
     skip_convert: bool = False,
     skip_imatrix: bool = False,
@@ -204,6 +192,12 @@ def run_pipeline(
     levels = levels or ["Q4_K_M", "Q5_K_M", "Q8_0"]
     outdir = outdir or (DEPLOY_DIR / version)
     outdir.mkdir(parents=True, exist_ok=True)
+    expected_version_dir = (MODELS_DIR / version).resolve()
+    if outdir.resolve() != expected_version_dir:
+        raise ValueError(f"deployment output must be models/{version} so current symlink can load it")
+    if register_quant and register_quant not in levels:
+        raise ValueError(f"register_quant={register_quant!r} is not one of requested quantization levels: {levels}")
+    selected_quant = register_quant or (levels[0] if levels else None)
 
     pipeline_result = {
         "version": version,
@@ -259,7 +253,7 @@ def run_pipeline(
 
     # ── Step 2: Convert to GGUF ────────────────────────────────
     logger.info("=== STEP 2: Convert to GGUF (f16) ===")
-    gguf_path = outdir / f"{version}-f16.gguf"
+    gguf_path = outdir / "model-f16.gguf"
     if not skip_convert:
         try:
             from scripts.convert_to_gguf import (
@@ -291,7 +285,7 @@ def run_pipeline(
 
     # ── Step 3: Generate imatrix ───────────────────────────────
     logger.info("=== STEP 3: Generate imatrix ===")
-    imatrix_path = outdir / f"{version}-imatrix.dat"
+    imatrix_path = outdir / "imatrix.dat"
     if not skip_imatrix:
         try:
             from scripts.create_imatrix import generate_calibration_text, run_imatrix, find_imatrix_binary
@@ -299,7 +293,7 @@ def run_pipeline(
             if calib_file:
                 calib_path = calib_file
             else:
-                calib_path = outdir / f"{version}-calib.txt"
+                calib_path = outdir / "calib.txt"
                 generate_calibration_text(
                     calib_path,
                     dataset_version=dataset_version,
@@ -332,7 +326,7 @@ def run_pipeline(
 
             quant_results = {}
             for level in levels:
-                output_path = outdir / f"{version}-{level}.gguf"
+                output_path = outdir / f"model-{level}.gguf"
                 result = quantize_level(quantize_bin, gguf_path, imatrix_path, output_path, level)
                 quant_results[level] = result
 
@@ -342,19 +336,25 @@ def run_pipeline(
                 "llama_cpp_commit": llama_cpp_commit,
             }
 
-            # ── Step 5: Register ────────────────────────────────────
-            logger.info("=== STEP 5: Register model versions ===")
-            for level in levels:
-                quant_path = outdir / f"{version}-{level}.gguf"
-                register_model_version(
-                    version=version,
-                    quant=level,
-                    gguf_path=quant_path,
-                    dataset_version=dataset_version,
-                    train_run=run_id,
-                    llama_cpp_commit=llama_cpp_commit,
-                )
-            pipeline_result["steps"]["register"] = {"status": "ok", "levels": levels}
+            # ── Step 5: Register one selected quant for this semantic version.
+            # Other quantized GGUFs remain available in the version directory;
+            # a different serving quant must use a new model version.
+            logger.info("=== STEP 5: Register selected candidate ===")
+            quant_path = outdir / f"model-{selected_quant}.gguf"
+            register_model_version(
+                version=version,
+                quant=selected_quant,
+                gguf_path=quant_path,
+                dataset_version=dataset_version,
+                train_run=run_id,
+                llama_cpp_commit=llama_cpp_commit,
+                eval_report=eval_report,
+            )
+            pipeline_result["steps"]["register"] = {
+                "status": "ok",
+                "selected_quant": selected_quant,
+                "available_levels": levels,
+            }
 
         except Exception as e:
             pipeline_result["steps"]["quantize"] = {"status": "error", "error": str(e)}
@@ -367,7 +367,7 @@ def run_pipeline(
         try:
             smoke_results = {}
             for level in levels:
-                quant_path = outdir / f"{version}-{level}.gguf"
+                quant_path = outdir / f"model-{level}.gguf"
                 if quant_path.exists():
                     smoke_results[level] = smoke_eval(quant_path)
             pipeline_result["steps"]["smoke_eval"] = {
@@ -394,9 +394,12 @@ def main():
     parser.add_argument("run_id", help="Training run ID")
     parser.add_argument("--version", required=True, help="Model version (e.g., v0.1.0)")
     parser.add_argument("--dataset", help="Dataset version used for training")
-    parser.add_argument("--outdir", help="Output directory (default: models/deploy/<version>)")
+    parser.add_argument("--outdir", help="Version directory (must be models/<version>)")
     parser.add_argument("--levels", nargs="+", default=["Q4_K_M", "Q5_K_M", "Q8_0"],
-                        help="Quantization levels")
+                        help="Quantization levels to build")
+    parser.add_argument("--register-quant", default="Q5_K_M",
+                        help="Which built quant becomes this model version (default: Q5_K_M)")
+    parser.add_argument("--eval-report", help="Relative path under eval/reports to attach later-stage gate results")
     parser.add_argument("--base-model", help="Base model name/path")
     parser.add_argument("--llama-cpp-dir", help="Path to llama.cpp directory")
     parser.add_argument("--calib-file", help="Calibration text file (auto-generated if omitted)")
@@ -413,6 +416,8 @@ def main():
         dataset_version=args.dataset,
         outdir=Path(args.outdir) if args.outdir else None,
         levels=args.levels,
+        register_quant=args.register_quant,
+        eval_report=args.eval_report,
         skip_merge=args.skip_merge,
         skip_convert=args.skip_convert,
         skip_imatrix=args.skip_imatrix,

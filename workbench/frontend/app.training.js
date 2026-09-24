@@ -5,7 +5,7 @@
 
 const DEFAULT_CFG = {
   run_name: "r001",
-  base_model: "Qwen/Qwen2.5-Coder-7B-Instruct",
+  base_model: "NousResearch/Hermes-2-Pro-Llama-3-8B",
   dataset_version: "v0001",
   seed: 3407,
   quantization: { load_in_4bit: true, quant_type: "nf4", double_quant: true },
@@ -62,8 +62,8 @@ function buildTrainingLayout(datasets, runs, baseModels) {
 
   /* ---- base model dropdown (adapters + custom) ---- */
   const baseModelOptions = [
-    ...baseModels.map(m => h("option", { value: m.hf_repo, selected: m.hf_repo === "Qwen/Qwen2.5-Coder-7B-Instruct", text: `${m.name} (${m.hf_repo})` })),
-    h("option", { value: "custom", text: "…พิมพ์เอง (custom HF repo)" }),
+    ...baseModels.map(m => h("option", { value: m.hf_repo, selected: m.hf_repo === "NousResearch/Hermes-2-Pro-Llama-3-8B", text: `${m.name} (${m.hf_repo})` })),
+    h("option", { value: "custom", text: "…พิมพ์เอง (Hermes 2 Pro / Qwen2.5 family เท่านั้น)" }),
   ];
 
   const form = h("div", { class: "card" },
@@ -186,7 +186,7 @@ function readForm() {
   const chk = id => $("#f-" + id).checked;
   return {
     run_name: str("run_name") || "r001",
-    base_model: (str("base_model_select") === "custom" ? str("base_model_custom") : str("base_model_select")) || "Qwen/Qwen2.5-Coder-7B-Instruct",
+    base_model: (str("base_model_select") === "custom" ? str("base_model_custom") : str("base_model_select")) || "NousResearch/Hermes-2-Pro-Llama-3-8B",
     dataset_version: str("dataset") || "v0001",
     seed: 3407,
     quantization: { load_in_4bit: chk("load_4bit"), quant_type: str("quant_type") || "nf4", double_quant: true },
@@ -207,9 +207,8 @@ async function runPreflightFromForm() {
   const box = $("#preflight-result");
   box.replaceChildren(h("div", { class: "hint", text: "กำลังตรวจสอบ..." }));
   try {
-    // Create a run first, then preflight
-    const run = await api("/training/runs", { method: "POST", body: { config: cfg } });
-    const report = await api(`/training/runs/${run.run_id}/preflight`, { method: "POST" });
+    // PF1-PF6 are checked without creating a run or starting a process.
+    const report = await api("/training/preflight", { method: "POST", body: { config: cfg } });
     renderPreflight(box, report);
   } catch (e) {
     box.replaceChildren(h("div", { class: "chip chip-err", text: "Preflight ล้มเหลว: " + e.message }));
@@ -217,7 +216,7 @@ async function runPreflightFromForm() {
 }
 
 function renderPreflight(box, report) {
-  const checks = report.checks || [];
+  const checks = report.results || report.checks || [];
   const failed = checks.filter(c => !c.passed);
   box.replaceChildren(
     h("h3", { text: `ผลตรวจสอบ (${checks.length - failed.length}/${checks.length} ผ่าน)` }),
@@ -225,7 +224,7 @@ function renderPreflight(box, report) {
       h("div", { class: "card", style: "padding:8px 12px" },
         h("div", { class: "cat-head" },
           h("span", { class: c.passed ? "chip chip-ok" : "chip chip-err", text: c.passed ? "✓" : "✗" }),
-          h("strong", { text: c.name })),
+          h("strong", { text: `${c.code || c.name || "PF"}${c.critical ? " · required" : ""}` })),
         h("div", { class: "hint", text: c.message })))),
     report.can_proceed
       ? h("div", { class: "chip chip-ok", style: "margin-top:8px", text: "✅ พร้อมเทรน" })
